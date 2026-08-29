@@ -52,7 +52,7 @@ router.post("/register", leitorController.create);
  * /api/users/login:
  *   post:
  *     summary: Login do usuário
- *     description: Autentica o usuário e retorna um JWT para a sessão.
+ *     description: Autentica o usuário validando email e senha.
  *     tags:
  *       - Autenticação
  *     requestBody:
@@ -73,7 +73,7 @@ router.post("/register", leitorController.create);
  *                 example: "minhaSenh4!"
  *     responses:
  *       '200':
- *         description: Login realizado com sucesso. Retorna o token JWT.
+ *         description: Login realizado com sucesso. Retorna os dados do usuário.
  *       '401':
  *         description: Email ou senha inválidos.
  */
@@ -131,6 +131,11 @@ router.get('/:userId', leitorController.select);
  *                 type: string
  *                 description: Nova senha (será criptografada automaticamente).
  *                 example: "novaSenh4!"
+ *               userLevel:
+ *                 type: string
+ *                 enum: [leitor, bibliotecario]
+ *                 description: Promove ou rebaixa o nível do usuário (bibliotecário pode conceder acesso administrativo).
+ *                 example: "bibliotecario"
  *     responses:
  *       '200':
  *         description: Usuário atualizado com sucesso.

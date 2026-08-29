@@ -1,6 +1,8 @@
 import { Router } from 'express'
 import { __filename, _dirname } from '../app.js'
 import readerRoutes from './leitor.routes.js'
+import bookRoutes from './book.routes.js'
+import emprestimoRoutes from './emprestimo.routes.js'
 
 import path from 'path'
 
@@ -20,6 +22,7 @@ router.get('/', (req,res) => {
 });
 
 router.use('/api/leitor', readerRoutes)
-//router.use('/api/livros', bookRoutes)
-//router.use('/api/bbtcario', bookRoutes)
+router.use('/api/users', readerRoutes)
+router.use('/api/livros', bookRoutes)
+router.use('/api/emprestimos', emprestimoRoutes)
 

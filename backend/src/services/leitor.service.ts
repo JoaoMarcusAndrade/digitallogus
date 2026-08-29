@@ -1,8 +1,6 @@
 import bcrypt from "bcrypt";
-import jwt from "jsonwebtoken";
 import User from "../models/User.js";
 
-const JWT_SECRET = process.env.JWT_SECRET;
 const SALT_ROUNDS = 10;
 
 function sanitizeUser(user: User) {
@@ -26,6 +24,8 @@ interface UpdateUserDTO {
     telephone?: string;
     email?: string;
     pass?: string;
+    // Promoção/rebaixamento de nível: 'leitor' | 'bibliotecario'
+    userLevel?: 'leitor' | 'bibliotecario';
 }
 
 export async function createUser(data: CreateUserDTO) {
@@ -68,26 +68,7 @@ export async function loginUser(email: string, pass: string) {
         throw new Error("Email ou senha inválidos.");
     }
 
-    // ✅ CORRIGIDO: Evita que o TS reclame do token_version caso ele não esteja mapeado no Model
-    const userData = user.toJSON() as any;
-
-    const token = jwt.sign(
-        {
-            userId: userData.id,
-            tv: userData.token_version || 1 // Fallback caso você decida usar controle de versões de token no futuro
-        },
-        JWT_SECRET!,
-        { expiresIn: "7d" }
-    );
-
-    return {
-        user: {
-            id: userData.id,
-            name: userData.name,
-            email: userData.email
-        },
-        token
-    };
+    return sanitizeUser(user);
 }
 
 export async function getAllUsers() {
@@ -139,6 +120,14 @@ export async function editUser(userId: number, admId: number, userParams: Update
 
         if (userParams.pass) {
             updateData.pass_hash = await bcrypt.hash(userParams.pass, SALT_ROUNDS);
+        }
+
+        // Promoção de nível — valida o valor enviado para não aceitar níveis desconhecidos
+        if (userParams.userLevel !== undefined) {
+            if (userParams.userLevel !== 'leitor' && userParams.userLevel !== 'bibliotecario') {
+                throw new Error("Nível inválido: use 'leitor' ou 'bibliotecario'.");
+            }
+            updateData.userLevel = userParams.userLevel;
         }
 
         await user.update(updateData);

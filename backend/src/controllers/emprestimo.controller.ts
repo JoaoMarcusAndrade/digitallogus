@@ -41,7 +41,7 @@ export const emprestimoController = {
     }
   },
 
-  /** GET /api/emprestimos?admId= — lista todos os empréstimos (bibliotecário) */
+  /** GET /api/emprestimos?admId= — lista os empréstimos (bibliotecário) com filtros e paginação */
   async selectAll(req: Request, res: Response): Promise<Response> {
     const admId = Number(req.query.admId);
 
@@ -50,7 +50,8 @@ export const emprestimoController = {
     }
 
     try {
-      const loans = await listAll(admId);
+      const { q, status, userId, page, perPage } = req.query as Record<string, any>;
+      const loans = await listAll(admId, { q, status, userId, page, perPage });
       return res.status(200).json(loans);
     } catch (error: any) {
       return handleError(res, error);
@@ -66,7 +67,8 @@ export const emprestimoController = {
     }
 
     try {
-      const loans = await listByUser(userId);
+      const { q, status, page, perPage } = req.query as Record<string, any>;
+      const loans = await listByUser(userId, { q, status, page, perPage });
       return res.status(200).json(loans);
     } catch (error: any) {
       return handleError(res, error);

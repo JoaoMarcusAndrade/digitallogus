@@ -16,10 +16,6 @@ export function fmtDateTime(d) {
   return dt.toLocaleDateString('pt-BR') + ' ' + dt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 }
 
-export function fmtMoney(v) {
-  return Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-}
-
 export function diffDias(prevista) {
   const p = new Date(prevista);
   const hoje = new Date();

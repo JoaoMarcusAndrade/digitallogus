@@ -20,7 +20,10 @@ export const ICONS = {
   arrowBack: '<path d="M20 11H7.8l5.6-5.6L12 4l-8 8 8 8 1.4-1.4L7.8 13H20v-2z"/>',
   eye: '<path d="M12 5c-5 0-9 3.1-9 7s4 7 9 7 9-3.1 9-7-4-7-9-7zm0 2.5A4.5 4.5 0 1 1 7.5 12 4.5 4.5 0 0 1 12 7.5zm0 2a2.5 2.5 0 1 0 2.5 2.5A2.5 2.5 0 0 0 12 9.5z"/>',
   download: '<path d="M11 3h2v9l3-3 1.4 1.4L12 16l-5.4-5.6L8 9l3 3V3zM5 17h14v2H5v-2z"/>',
-  calendar: '<path d="M6 2v2h12V2h2v20h-2V22H6v2H4V2h2zm0 4v14h12V6H6zm2 2h2v2h-2V8zm6 0h2v2h-2V8zM8 12h2v2H8v-2zm6 0h2v2h-2v-2zM8 16h2v2H8v-2zm6 0h2v2h-2v-2z"/>'
+  calendar: '<path d="M6 2v2h12V2h2v20h-2V22H6v2H4V2h2zm0 4v14h12V6H6zm2 2h2v2h-2V8zm6 0h2v2h-2V8zM8 12h2v2H8v-2zm6 0h2v2h-2v-2zM8 16h2v2H8v-2zm6 0h2v2h-2v-2z"/>',
+  user: '<path d="M12 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10zm0 2c-4 0-8 2-8 5v3h16v-3c0-3-4-5-8-5z"/>',
+  lock: '<path d="M12 2a5 5 0 0 1 5 5v3h1a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h1V7a5 5 0 0 1 5-5zm0 2a3 3 0 0 0-3 3v3h6V7a3 3 0 0 0-3-3z"/>',
+  arrowRight: '<path d="M13 5l7 7-7 7-1.4-1.4 4.6-4.6H4v-2h12.2l-4.6-4.6L13 5z"/>'
 };
 
 export function Icon({ name, className = 'icon', size }) {

@@ -1,66 +1,71 @@
 /* ============================================================
-   BiblioGestor — Página: Dashboard
+   Alexandria — Página: Dashboard (bibliotecário)
    ============================================================ */
 
 import { useNavigate } from 'react-router-dom';
 import { Icon } from '../ui/icons.jsx';
 import { StatusBadge } from '../ui/Modal.jsx';
 import { useApp } from '../AppContext.jsx';
-import {
-  useStore, livros, usuarios, emprestimos, emprestimosAtivos, emprestimosAtrasados,
-  usuario, livro, usuariosAtivos, receitaMultas, totalExemplares, totalDisponiveis
-} from '../store/store.js';
-import { initials, fmtDate, fmtMoney, escapeHtml } from '../ui/format.js';
+import { useSession } from '../store/session.jsx';
+import api from '../api/client.js';
+import { useApi } from '../api/useApi.js';
+import { corPara } from '../ui/labels.js';
+import { initials, fmtDate } from '../ui/format.js';
 
 export function Dashboard() {
-  useStore();
   const navigate = useNavigate();
-  const { openLoan } = useApp();
+  const { user, admId } = useSession();
+  const { openLoan, dataVersion } = useApp();
 
-  const totalEx = totalExemplares();
-  const disp = totalDisponiveis();
-  const ativos = emprestimosAtivos();
-  const atrasados = emprestimosAtrasados();
-  const userAtivos = usuariosAtivos();
-  const multas = receitaMultas();
-  const pct = totalEx ? Math.round((disp / totalEx) * 100) : 0;
+  const { data: painel, loading, erro } = useApi(
+    async () => api.dashboardResumo(admId),
+    [admId, dataVersion]
+  );
+
+  const stats = painel?.stats;
+  const totalEx = stats?.totalCopies ?? 0;
+  const disp = stats?.totalAvailable ?? 0;
+  const ocupacao = stats?.occupancyRate ?? 0;
+  const pct = stats?.availabilityRate ?? 0;
+  const atrasados = stats?.loansOverdue ?? 0;
+  const noPrazo = stats?.loansActive ?? 0;
+  const emAberto = noPrazo + atrasados;
+  const userAtivos = stats?.usersActive ?? 0;
+  const userInativos = stats?.usersInactive ?? 0;
 
   const hoje = new Date();
   const saud = hoje.getHours() < 12 ? 'Bom dia' : hoje.getHours() < 18 ? 'Boa tarde' : 'Boa noite';
   const dt = hoje.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  const primeiro = user?.firstName || (user?.name || 'Bibliotecário').split(' ')[0];
 
-  const recentes = emprestimos().slice(0, 6).map((e) => {
-    const u = usuario(e.usuarioId);
-    const l = livro(e.livroId);
-    const atrasado = e.status !== 'devolvido' && (new Date(e.dataDevolucaoPrevista) < new Date());
-    const st = e.status === 'devolvido' ? 'devolvido' : atrasado ? 'atrasado' : 'ativo';
-    return (
-      <li key={e.id}>
-        <div className="avatar-sm" style={{ background: u ? u.color || '#64748b' : '#64748b' }}>{u ? initials(u.nome) : '?'}</div>
-        <div className="m-main">
-          <b>{l ? l.titulo : '—'}</b>
-          <span>{u ? u.nome : '—'}</span>
-        </div>
-        <div className="m-side">
-          <StatusBadge status={st} />
-          <br />
-          <span style={{ fontSize: 11 }}>dev. {fmtDate(e.dataDevolucaoPrevista)}</span>
-        </div>
-      </li>
-    );
-  });
+  const recentes = (painel?.recent || []).map((e) => (
+    <li key={e.id}>
+      <div className="avatar-sm" style={{ background: e.reader ? corPara(e.reader.name) : '#64748b' }}>
+        {e.reader ? initials(e.reader.name) : '?'}
+      </div>
+      <div className="m-main">
+        <b>{e.book ? e.book.title : '—'}</b>
+        <span>{e.reader ? e.reader.name : '—'}</span>
+      </div>
+      <div className="m-side">
+        <StatusBadge status={e.status} />
+        <br />
+        <span style={{ fontSize: 11 }}>dev. {fmtDate(e.dataDevolucaoPrevista)}</span>
+      </div>
+    </li>
+  ));
 
-  const baixaDisp = livros().filter((l) => l.exemplaresDisp === 0).slice(0, 4).map((l) => {
-    const emUso = l.exemplares - l.exemplaresDisp;
+  const esgotados = (painel?.outOfStockTitles || []).map((l) => {
+    const emUso = l.quantity - l.quantityAvailable;
     return (
       <li key={l.id}>
-        <div className="book-cover" style={{ background: l.capa }}>{escapeHtml(l.titulo.charAt(0))}</div>
+        <div className="book-cover" style={{ background: l.coverColor || corPara(l.title) }}>{l.title.charAt(0)}</div>
         <div className="m-main">
-          <b>{l.titulo}</b>
-          <span>Localização: {l.localizacao}</span>
+          <b>{l.title}</b>
+          <span>Localização: {l.location || '—'}</span>
         </div>
         <div className="m-side">
-          <b style={{ color: 'var(--red)' }}>{emUso}/{l.exemplares}</b>
+          <b style={{ color: 'var(--red)' }}>{emUso}/{l.quantity}</b>
           <br />
           <span style={{ fontSize: 11 }}>exemplares em uso</span>
         </div>
@@ -68,22 +73,17 @@ export function Dashboard() {
     );
   });
 
-  const cats = {};
-  livros().forEach((l) => { cats[l.categoria] = (cats[l.categoria] || 0) + l.exemplares; });
-  const catMax = Math.max(1, ...Object.values(cats));
-  const catRows = Object.entries(cats)
-    .sort((a, b) => b[1] - a[1])
-    .map(([c, n]) => (
-      <div className="bookbar" key={c}>
-        <div style={{ width: 130, fontSize: 13, fontWeight: 600 }}>{c}</div>
-        <div className="bar-track" style={{ height: 10 }}>
-          <div className="solid-bar" style={{ width: Math.round((n / catMax) * 100) + '%', height: '100%' }}></div>
-        </div>
-        <div style={{ width: 34, textAlign: 'right', fontWeight: 700, fontSize: 13 }}>{n}</div>
+  const categorias = painel?.categories || [];
+  const catMax = Math.max(1, ...categorias.map((c) => c.copies));
+  const catRows = categorias.map((c) => (
+    <div className="bookbar" key={c.category}>
+      <div style={{ width: 130, fontSize: 13, fontWeight: 600 }}>{c.category}</div>
+      <div className="bar-track" style={{ height: 10 }}>
+        <div className="solid-bar" style={{ width: Math.round((c.copies / catMax) * 100) + '%', height: '100%' }}></div>
       </div>
-    ));
-
-  const userInativos = usuarios().length - userAtivos;
+      <div style={{ width: 34, textAlign: 'right', fontWeight: 700, fontSize: 13 }}>{c.copies}</div>
+    </div>
+  ));
 
   return (
     <div className="view-enter">
@@ -92,11 +92,11 @@ export function Dashboard() {
         <div className="hero-glow hero-glow-b"></div>
         <div className="hero-main">
           <span className="hero-kicker">Painel de controle</span>
-          <h1 className="hero-title">{saud}, Ana</h1>
+          <h1 className="hero-title">{saud}, {primeiro}</h1>
           <p className="hero-sub">{dt.charAt(0).toUpperCase() + dt.slice(1)} — resumo geral da biblioteca.</p>
           <div style={{ marginTop: 16, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <span className="hero-pill"><Icon name="loans" /> <b>{ativos.length}</b> empréstimos ativos</span>
-            <span className="hero-pill"><Icon name="bell" /> <b>{atrasados.length}</b> atrasados</span>
+            <span className="hero-pill"><Icon name="loans" /> <b>{emAberto}</b> empréstimos ativos</span>
+            <span className="hero-pill"><Icon name="bell" /> <b>{atrasados}</b> atrasados</span>
             <span className="hero-pill"><Icon name="check" /> <b>{disp}</b> exemplares livres</span>
           </div>
         </div>
@@ -110,12 +110,19 @@ export function Dashboard() {
         </div>
       </div>
 
+      {erro && (
+        <div className="alert alert-danger" style={{ marginBottom: 16 }}>
+          <Icon name="close" />
+          <div><b>Não foi possível carregar o painel</b><span>{erro}</span></div>
+        </div>
+      )}
+
       <div className="stats-grid">
-        <StatCard color="teal" ic="books" valor={totalEx} label="Exemplares no acervo" hint={<><span className="up">84%</span> de ocupação do acervo</>} />
+        <StatCard color="teal" ic="books" valor={totalEx} label="Exemplares no acervo" hint={<><span className="up">{ocupacao}%</span> de ocupação do acervo</>} />
         <StatCard color="indigo" ic="check" valor={disp} label="Disponíveis para empréstimo" hint={pct + '% do total'} />
         <StatCard color="blue" ic="users" valor={userAtivos} label="Usuários ativos" hint={userInativos + ' inativos'} />
-        <StatCard color="amber" ic="loans" valor={ativos.length} label="Empréstimos ativos" hint={multas > 0 ? <><span className="down">{fmtMoney(multas)}</span> em multas</> : 'Sem multas pendentes'} />
-        <StatCard color="red" ic="bell" valor={atrasados.length} label="Atrasados" hint={atrasados.length > 0 ? 'Exigem atenção' : 'Tudo em dia'} />
+        <StatCard color="amber" ic="loans" valor={emAberto} label="Empréstimos ativos" hint={<><span className="up">{noPrazo}</span> dentro do prazo</>} />
+        <StatCard color="red" ic="bell" valor={atrasados} label="Atrasados" hint={atrasados > 0 ? 'Exigem atenção' : 'Tudo em dia'} />
       </div>
 
       <div className="grid-2-1">
@@ -127,7 +134,11 @@ export function Dashboard() {
             </div>
             <button className="btn btn-sm btn-ghost" onClick={() => navigate('/emprestimos')}>Ver todos</button>
           </div>
-          <ul className="mini-list">{recentes.length ? recentes : <li><p style={{ padding: 20, color: 'var(--text-3)', fontSize: 13 }}>Nenhum empréstimo registrado.</p></li>}</ul>
+          {loading ? (
+            <p style={{ padding: 20, color: 'var(--text-3)', fontSize: 13 }}>Carregando...</p>
+          ) : (
+            <ul className="mini-list">{recentes.length ? recentes : <li><p style={{ padding: 20, color: 'var(--text-3)', fontSize: 13 }}>Nenhum empréstimo registrado.</p></li>}</ul>
+          )}
         </div>
 
         <div style={{ display: 'grid', gap: 16, alignContent: 'start' }}>
@@ -135,8 +146,8 @@ export function Dashboard() {
             <div className="card-head">
               <div className="card-title"><span className="card-ico"><Icon name="bell" /></span> Títulos esgotados</div>
             </div>
-            {baixaDisp.length
-              ? <ul className="mini-list">{baixaDisp}</ul>
+            {esgotados.length
+              ? <ul className="mini-list">{esgotados}</ul>
               : (
                 <div className="empty-state" style={{ padding: 28, textAlign: 'center', color: 'var(--text-3)' }}>
                   <Icon name="check" />
@@ -153,7 +164,7 @@ export function Dashboard() {
             <div className="card-head">
               <div className="card-title"><span className="card-ico"><Icon name="reports" /></span> Acervo por categoria</div>
             </div>
-            {catRows}
+            {catRows.length ? catRows : <p style={{ padding: 16, color: 'var(--text-3)', fontSize: 13 }}>Sem categorias cadastradas.</p>}
           </div>
         </div>
       </div>

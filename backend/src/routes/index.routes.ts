@@ -3,6 +3,7 @@ import { __filename, _dirname } from '../app.js'
 import readerRoutes from './leitor.routes.js'
 import bookRoutes from './book.routes.js'
 import emprestimoRoutes from './emprestimo.routes.js'
+import dashboardRoutes from './dashboard.routes.js'
 
 import path from 'path'
 
@@ -25,4 +26,5 @@ router.use('/api/leitor', readerRoutes)
 router.use('/api/users', readerRoutes)
 router.use('/api/livros', bookRoutes)
 router.use('/api/emprestimos', emprestimoRoutes)
+router.use('/api/dashboard', dashboardRoutes)
 

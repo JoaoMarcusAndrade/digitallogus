@@ -1,13 +1,16 @@
 /* ============================================================
-   BiblioGestor — Página: Acervo (CRUD de livros)
+   Alexandria — Página: Acervo (CRUD de títulos)
    ============================================================ */
 
-import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
 import { Icon } from '../ui/icons.jsx';
 import { useModal, useToast, ModalHead, Field, Dl, StatusBadge } from '../ui/Modal.jsx';
 import { useApp } from '../AppContext.jsx';
-import { useStore, livros, livro, addLivro, updateLivro, removeLivro, emprestimos, usuario } from '../store/store.js';
+import { useSession } from '../store/session.jsx';
+import api from '../api/client.js';
+import { useApi } from '../api/useApi.js';
+import { useDebounce } from '../api/useDebounce.js';
+import { corPara, statusLivro } from '../ui/labels.js';
 import { Pagination, EmptyRow } from '../ui/common.jsx';
 import { fmtDate } from '../ui/format.js';
 
@@ -15,44 +18,38 @@ const CATEGORIAS = ['Romance', 'Ficção', 'Infantojuvenil', 'Técnico', 'Histó
 
 const STATUS_OPTIONS = [
   ['', 'Todos os status'],
-  ['disponivel', 'Disponível'],
-  ['emprestado', 'Emprestado'],
-  ['esgotado', 'Esgotado']
+  ['available', 'Disponível'],
+  ['loaned', 'Emprestado'],
+  ['out', 'Esgotado']
 ];
 
+const PER_PAGE = 8;
+
 export function Acervo() {
-  useStore();
-  const navigate = useNavigate();
+  const { isBibliotecario, admId } = useSession();
   const { openModal, confirmBox } = useModal();
   const toast = useToast();
+  const { detailRequest, dataVersion, reloadData } = useApp();
 
   const [q, setQ] = useState('');
   const [cat, setCat] = useState('');
   const [status, setStatus] = useState('');
   const [page, setPage] = useState(1);
-  const perPage = 8;
+  const qBusca = useDebounce(q, 300);
 
-  const all = livros();
+  const { data: pagina, loading, erro } = useApi(
+    async () => api.listBooks({ q: qBusca, category: cat, status, page, perPage: PER_PAGE }),
+    [qBusca, cat, status, page, dataVersion]
+  );
 
-  const filtered = useMemo(() => {
-    const query = q.trim().toLowerCase();
-    return all.filter((l) => {
-      const texto = (l.titulo + ' ' + l.autor + ' ' + l.isbn + ' ' + l.editora).toLowerCase();
-      if (query && !texto.includes(query)) return false;
-      if (cat && l.categoria !== cat) return false;
-      const emUso = l.exemplares - l.exemplaresDisp;
-      const st = l.exemplaresDisp === 0 ? 'esgotado' : (emUso > 0 ? 'emprestado' : 'disponivel');
-      if (status && st !== status) return false;
-      return true;
-    });
-  }, [all, q, cat, status]);
+  const { data: categoriasApi } = useApi(async () => api.listCategories(), []);
+  const categorias = [...new Set([...CATEGORIAS, ...(categoriasApi || []).map((c) => c.category)])];
 
-  const pages = Math.max(1, Math.ceil(filtered.length / perPage));
-  const safePage = Math.min(page, pages);
-  const ini = (safePage - 1) * perPage;
-  const slice = filtered.slice(ini, ini + perPage);
+  const itens = pagina?.items || [];
+  const total = pagina?.total ?? 0;
+  const pages = pagina?.pages || 1;
+  const ini = (Math.min(page, pages) - 1) * PER_PAGE;
 
-  const { detailRequest } = useApp();
   useEffect(() => {
     if (detailRequest && detailRequest.page === 'acervo' && detailRequest.id) {
       openDetail(detailRequest.id);
@@ -60,25 +57,25 @@ export function Acervo() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detailRequest]);
 
-  const openForm = (id) => {
-    const l = id ? livro(id) : null;
-    openModal(<LivroForm id={id} l={l} />, 'md');
+  const openForm = (id, livro) => {
+    openModal(<LivroForm id={id} l={livro} onSaved={reloadData} />, 'md');
   };
 
   const openDetail = (id) => {
-    const l = livro(id);
-    if (!l) return;
-    openModal(<LivroDetail id={id} l={l} onEdit={() => openForm(id)} />, 'md');
+    openModal(<LivroDetail id={id} onEdit={(l) => openForm(l.id, l)} />, 'md');
   };
 
-  const excluir = (id) => {
-    const l = livro(id);
-    if (!l) return;
+  const excluir = (l) => {
     confirmBox(
-      'Deseja realmente excluir <b>' + l.titulo + '</b> do acervo? Esta ação não poderá ser desfeita.',
-      () => {
-        const r = removeLivro(id);
-        toast(r.ok ? 'Título removido do acervo.' : r.msg, r.ok ? 'success' : 'warn');
+      'Deseja realmente excluir <b>' + l.title + '</b> do acervo? Esta ação não poderá ser desfeita.',
+      async () => {
+        try {
+          await api.deleteBook(admId, l.id);
+          toast('Título removido do acervo.', 'success');
+          reloadData();
+        } catch (e) {
+          toast(e.message || 'Não foi possível remover o título.', 'warn');
+        }
       },
       { title: 'Excluir título', okText: 'Excluir', danger: true }
     );
@@ -90,17 +87,23 @@ export function Acervo() {
         <div>
           <span className="page-kicker">Catálogo</span>
           <h1 className="page-title">Acervo</h1>
-          <p className="page-sub">{all.length} títulos cadastrados no acervo da biblioteca.</p>
+          <p className="page-sub">{total} título{total !== 1 ? 's' : ''} no acervo da biblioteca.</p>
         </div>
         <div className="page-actions">
-          <button className="btn btn-ghost" onClick={() => navigate('/relatorios')}>
-            <Icon name="reports" /> Relatórios
-          </button>
-          <button className="btn btn-primary" onClick={() => openForm(null)}>
-            <Icon name="plus" /> Novo título
-          </button>
+          {isBibliotecario && (
+            <button className="btn btn-primary" onClick={() => openForm(null, null)}>
+              <Icon name="plus" /> Novo título
+            </button>
+          )}
         </div>
       </div>
+
+      {erro && (
+        <div className="alert alert-danger" style={{ marginBottom: 16 }}>
+          <Icon name="close" />
+          <div><b>Não foi possível carregar o acervo</b><span>{erro}</span></div>
+        </div>
+      )}
 
       <div className="card">
         <div className="toolbar">
@@ -115,12 +118,12 @@ export function Acervo() {
           </div>
           <select className="select" value={cat} onChange={(e) => { setCat(e.target.value); setPage(1); }}>
             <option value="">Todas as categorias</option>
-            {CATEGORIAS.map((c) => <option key={c} value={c}>{c}</option>)}
+            {categorias.map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
           <select className="select" value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }}>
             {STATUS_OPTIONS.map(([v, t]) => <option key={v} value={v}>{t}</option>)}
           </select>
-          <span className="result-count">{filtered.length} resultado{filtered.length !== 1 ? 's' : ''}</span>
+          <span className="result-count">{total} resultado{total !== 1 ? 's' : ''}</span>
         </div>
 
         <div className="table-wrap">
@@ -132,121 +135,158 @@ export function Acervo() {
               </tr>
             </thead>
             <tbody>
-              {slice.length ? slice.map((l) => <LivroRow key={l.id} l={l} onVer={openDetail} onEditar={openForm} onExcluir={excluir} />)
-                : <EmptyRow icon="books" text="Nenhum título encontrado para os filtros aplicados." colspan={7} />}
+              {loading && !itens.length
+                ? <EmptyRow icon="books" text="Carregando..." colspan={7} />
+                : itens.length
+                  ? itens.map((l) => (
+                    <LivroRow
+                      key={l.id}
+                      l={l}
+                      podeEditar={isBibliotecario}
+                      onVer={() => openDetail(l.id)}
+                      onEditar={() => openForm(l.id, l)}
+                      onExcluir={() => excluir(l)}
+                    />
+                  ))
+                  : <EmptyRow icon="books" text="Nenhum título encontrado para os filtros aplicados." colspan={7} />}
             </tbody>
           </table>
         </div>
 
-        <Pagination ini={ini} total={filtered.length} perPage={perPage} page={safePage} onPage={setPage} />
+        <Pagination ini={ini} total={total} perPage={PER_PAGE} page={Math.min(page, pages)} onPage={setPage} />
       </div>
     </div>
   );
 }
 
-function livroStatus(l) {
-  const emUso = l.exemplares - l.exemplaresDisp;
-  return l.exemplaresDisp === 0 ? 'esgotado' : (emUso > 0 ? 'emprestado' : 'disponivel');
-}
-
-function LivroRow({ l, onVer, onEditar, onExcluir }) {
-  const st = livroStatus(l);
+function LivroRow({ l, podeEditar, onVer, onEditar, onExcluir }) {
   return (
     <tr>
       <td>
         <div className="cell-book">
-          <div className="book-cover" style={{ background: l.capa }}>{l.titulo.charAt(0)}</div>
+          <div className="book-cover" style={{ background: l.coverColor || corPara(l.title) }}>{l.title.charAt(0)}</div>
           <div className="cell-title">
-            <b>{l.titulo}</b>
-            <span>{l.autor} · {l.editora} ({l.ano})</span>
+            <b>{l.title}</b>
+            <span>{l.author} · {l.publisher} ({l.year})</span>
           </div>
         </div>
       </td>
-      <td><span className="badge badge-gray">{l.categoria}</span></td>
-      <td style={{ fontFamily: 'ui-monospace,monospace', fontSize: '12.5px' }}>{l.isbn}</td>
-      <td>{l.localizacao}</td>
-      <td style={{ textAlign: 'center' }}>{l.exemplaresDisp}/{l.exemplares}</td>
-      <td><StatusBadge status={st} /></td>
+      <td><span className="badge badge-gray">{l.category}</span></td>
+      <td style={{ fontFamily: 'ui-monospace,monospace', fontSize: '12.5px' }}>{l.ISBN}</td>
+      <td>{l.location || '—'}</td>
+      <td style={{ textAlign: 'center' }}>{l.quantityAvailable}/{l.quantity}</td>
+      <td><StatusBadge status={statusLivro(l)} /></td>
       <td>
         <div className="row-actions">
-          <button className="row-action" onClick={() => onVer(l.id)} title="Detalhes"><Icon name="eye" /></button>
-          <button className="row-action edit" onClick={() => onEditar(l.id)} title="Editar"><Icon name="edit" /></button>
-          <button className="row-action danger" onClick={() => onExcluir(l.id)} title="Excluir"><Icon name="trash" /></button>
+          <button className="row-action" onClick={onVer} title="Detalhes"><Icon name="eye" /></button>
+          {podeEditar && (
+            <>
+              <button className="row-action edit" onClick={onEditar} title="Editar"><Icon name="edit" /></button>
+              <button className="row-action danger" onClick={onExcluir} title="Excluir"><Icon name="trash" /></button>
+            </>
+          )}
         </div>
       </td>
     </tr>
   );
 }
 
-function LivroForm({ id, l }) {
+function LivroForm({ id, l, onSaved }) {
   const { closeModal } = useModal();
   const toast = useToast();
-  const isEdit = !!l;
+  const { admId } = useSession();
+  const isEdit = !!id;
+
   const [dados, setDados] = useState(() => ({
-    titulo: l ? l.titulo : '',
-    autor: l ? l.autor : '',
-    isbn: l ? l.isbn : '',
-    categoria: l ? l.categoria : '',
-    editora: l ? l.editora : '',
-    ano: l ? l.ano : new Date().getFullYear(),
-    localizacao: l ? l.localizacao : '',
-    exemplares: l ? l.exemplares : 1
+    title: l ? l.title : '',
+    author: l ? l.author : '',
+    ISBN: l ? l.ISBN : '',
+    category: l ? l.category : '',
+    publisher: l ? l.publisher : '',
+    year: l ? l.year : new Date().getFullYear(),
+    location: l ? l.location : '',
+    quantity: l ? l.quantity : 1
   }));
+  const [salvando, setSalvando] = useState(false);
 
   const set = (k) => (e) => setDados((d) => ({ ...d, [k]: e.target.value }));
 
-  const submit = (e) => {
+  const submit = async (e) => {
     e.preventDefault();
-    if (!dados.titulo.trim() || !dados.autor.trim()) { toast('Preencha os campos obrigatórios.', 'warn'); return; }
-    const cor = ['#dc2626', '#2563eb', '#059669', '#d97706', '#7c3aed', '#0891b2', '#b45309'][Math.floor(Math.random() * 7)];
-    if (isEdit) {
-      updateLivro(id, { ...dados, ano: Number(dados.ano), exemplares: Number(dados.exemplares), capa: l.capa || cor });
-      toast('Título atualizado com sucesso.', 'success');
-    } else {
-      addLivro({ ...dados, ano: Number(dados.ano), exemplares: Number(dados.exemplares), capa: cor });
-      toast('Título cadastrado com sucesso.', 'success');
+    if (!dados.title.trim() || !dados.author.trim() || !dados.ISBN.trim()) {
+      toast('Preencha os campos obrigatórios.', 'warn');
+      return;
     }
-    closeModal();
+
+    const payload = {
+      title: dados.title.trim(),
+      author: dados.author.trim(),
+      ISBN: dados.ISBN.trim(),
+      publisher: dados.publisher.trim(),
+      category: dados.category || 'Outros',
+      year: Number(dados.year) || new Date().getFullYear(),
+      location: dados.location.trim(),
+      quantity: Number(dados.quantity) || 1
+    };
+
+    setSalvando(true);
+    try {
+      if (isEdit) {
+        await api.updateBook(admId, id, payload);
+        toast('Título atualizado com sucesso.', 'success');
+      } else {
+        await api.createBook(admId, payload);
+        toast('Título cadastrado com sucesso.', 'success');
+      }
+      onSaved?.();
+      closeModal();
+    } catch (err) {
+      toast(err.message || 'Não foi possível salvar o título.', 'warn');
+    } finally {
+      setSalvando(false);
+    }
   };
 
   return (
     <>
       <ModalHead title={isEdit ? 'Editar título' : 'Novo título'}
-        sub={isEdit ? 'Atualize as informações do exemplar.' : 'Cadastre um novo título no acervo.'} />
+        sub={isEdit ? 'Atualize as informações do título no acervo.' : 'Cadastre um novo título no acervo.'} />
       <form id="form-livro" onSubmit={submit}>
         <div className="modal-body">
           <div className="form-grid">
             <Field label="Título *" full>
-              <input className="input" value={dados.titulo} onChange={set('titulo')} placeholder="Nome da obra" required />
+              <input className="input" value={dados.title} onChange={set('title')} placeholder="Nome da obra" required />
             </Field>
             <Field label="Autor *">
-              <input className="input" value={dados.autor} onChange={set('autor')} placeholder="Nome do autor" required />
+              <input className="input" value={dados.author} onChange={set('author')} placeholder="Nome do autor" required />
             </Field>
-            <Field label="ISBN">
-              <input className="input" value={dados.isbn} onChange={set('isbn')} placeholder="978-..." />
+            <Field label="ISBN *">
+              <input className="input" value={dados.ISBN} onChange={set('ISBN')} placeholder="978-..." required />
             </Field>
             <Field label="Categoria" full>
-              <select className="select" style={{ width: '100%' }} value={dados.categoria} onChange={set('categoria')} required>
+              <select className="select" style={{ width: '100%' }} value={dados.category} onChange={set('category')} required>
                 <option value="" disabled>Selecione a categoria...</option>
                 {CATEGORIAS.map((c) => <option key={c} value={c}>{c}</option>)}
               </select>
             </Field>
             <Field label="Editora">
-              <input className="input" value={dados.editora} onChange={set('editora')} placeholder="Editora" />
+              <input className="input" value={dados.publisher} onChange={set('publisher')} placeholder="Editora" />
             </Field>
             <Field label="Ano">
-              <input className="input" type="number" min="1000" max="2100" value={dados.ano} onChange={set('ano')} />
+              <input className="input" type="number" min="1000" max="2100" value={dados.year} onChange={set('year')} />
             </Field>
             <Field label="Localização">
-              <input className="input" value={dados.localizacao} onChange={set('localizacao')} placeholder="Ex.: A1-03" />
+              <input className="input" value={dados.location} onChange={set('location')} placeholder="Ex.: A1-03" />
             </Field>
             <Field label="Nº de exemplares" full>
-              <input className="input" type="number" min="1" value={dados.exemplares} onChange={set('exemplares')} />
+              <input className="input" type="number" min="1" value={dados.quantity} onChange={set('quantity')} />
             </Field>
           </div>
           <div className="form-actions">
             <button type="button" className="btn" onClick={closeModal}>Cancelar</button>
-            <button type="submit" className="btn btn-primary">{isEdit ? 'Salvar alterações' : 'Cadastrar título'}</button>
+            <button type="submit" className="btn btn-primary" disabled={salvando}>
+              {salvando ? 'Salvando...' : (isEdit ? 'Salvar alterações' : 'Cadastrar título')}
+            </button>
           </div>
         </div>
       </form>
@@ -254,58 +294,77 @@ function LivroForm({ id, l }) {
   );
 }
 
-function LivroDetail({ id, l, onEdit }) {
+function LivroDetail({ id, onEdit }) {
   const { closeModal } = useModal();
-  const emUso = l.exemplares - l.exemplaresDisp;
-  const st = livroStatus(l);
-  const historico = emprestimos().filter((e) => e.livroId === id).slice(0, 5);
+  const { isBibliotecario, admId } = useSession();
+
+  const { data: livro, loading } = useApi(async () => api.getBook(id), [id]);
+  // O histórico de quem pegou o livro é restrito ao bibliotecário (a API exige `admId`).
+  const { data: historico } = useApi(
+    async () => (isBibliotecario ? api.bookHistory(admId, id) : []),
+    [id, admId, isBibliotecario]
+  );
+
+  const emUso = livro ? livro.quantity - livro.quantityAvailable : 0;
 
   return (
     <>
-      <ModalHead title="Detalhes do título" sub="Registro completo do exemplar no acervo." />
+      <ModalHead title="Detalhes do título" sub="Registro completo do título no acervo." />
       <div className="modal-body">
-        <div className="detail-hero">
-          <div className="book-cover" style={{ background: l.capa, width: 64, height: 88, fontSize: 22 }}>{l.titulo.charAt(0)}</div>
-          <div>
-            <h3>{l.titulo}</h3>
-            <p>{l.autor}</p>
-            <div style={{ marginTop: 8 }}>
-              <StatusBadge status={st} /> <span className="badge badge-gray">{l.categoria}</span>
+        {loading || !livro ? (
+          <p style={{ color: 'var(--text-3)', fontSize: 13 }}>Carregando...</p>
+        ) : (
+          <>
+            <div className="detail-hero">
+              <div className="book-cover" style={{ background: livro.coverColor || corPara(livro.title), width: 64, height: 88, fontSize: 22 }}>
+                {livro.title.charAt(0)}
+              </div>
+              <div>
+                <h3>{livro.title}</h3>
+                <p>{livro.author}</p>
+                <div style={{ marginTop: 8 }}>
+                  <StatusBadge status={statusLivro(livro)} /> <span className="badge badge-gray">{livro.category}</span>
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
 
-        <div style={{ marginTop: 16 }} className="detail-list">
-          <Dl label="ISBN" value={l.isbn || '—'} />
-          <Dl label="Editora" value={l.editora || '—'} />
-          <Dl label="Ano" value={l.ano} />
-          <Dl label="Localização" value={l.localizacao || '—'} />
-          <Dl label="Exemplares" value={l.exemplares} />
-          <Dl label="Disponíveis" value={<b style={{ color: l.exemplaresDisp > 0 ? 'var(--green)' : 'var(--red)' }}>{l.exemplaresDisp}</b>} />
-          <Dl label="Cadastrado em" value={fmtDate(l.adicionadoEm)} />
-          <Dl label="Em uso" value={emUso} />
-        </div>
+            <div style={{ marginTop: 16 }} className="detail-list">
+              <Dl label="ISBN" value={livro.ISBN || '—'} />
+              <Dl label="Editora" value={livro.publisher || '—'} />
+              <Dl label="Ano" value={livro.year ?? '—'} />
+              <Dl label="Localização" value={livro.location || '—'} />
+              <Dl label="Exemplares" value={livro.quantity} />
+              <Dl label="Disponíveis" value={<b style={{ color: livro.quantityAvailable > 0 ? 'var(--green)' : 'var(--red)' }}>{livro.quantityAvailable}</b>} />
+              <Dl label="Cadastrado em" value={fmtDate(livro.createdAt)} />
+              <Dl label="Em uso" value={emUso} />
+            </div>
+          </>
+        )}
 
         <h4 style={{ margin: '18px 0 6px', fontSize: 13, fontWeight: 700 }}>Histórico de empréstimos</h4>
-        {historico.length ? (
+        {!isBibliotecario ? (
+          <p style={{ color: 'var(--text-3)', fontSize: 13 }}>O histórico de empréstimos é visível apenas para a equipe da biblioteca.</p>
+        ) : historico && historico.length ? (
           <ul className="mini-list">
-            {historico.map((e) => {
-              const u = usuario(e.usuarioId);
-              return (
-                <li key={e.id} style={{ padding: '10px 0' }}>
-                  <div className="m-main"><b>{u ? u.nome : '—'}</b><span>Emprestado em {fmtDate(e.dataEmprestimo)}</span></div>
-                  <div className="m-side"><StatusBadge status={e.status} /></div>
-                </li>
-              );
-            })}
+            {historico.map((e) => (
+              <li key={e.id} style={{ padding: '10px 0' }}>
+                <div className="m-main">
+                  <b>{e.reader ? e.reader.name : '—'}</b>
+                  <span>Emprestado em {fmtDate(e.dataEmprestimo)}</span>
+                </div>
+                <div className="m-side"><StatusBadge status={e.status} /></div>
+              </li>
+            ))}
           </ul>
         ) : <p style={{ color: 'var(--text-3)', fontSize: 13 }}>Sem registro de empréstimos.</p>}
 
         <div className="form-actions">
           <button className="btn" onClick={closeModal}>Fechar</button>
-          <button className="btn btn-soft" onClick={() => { closeModal(); onEdit(); }}>
-            <Icon name="edit" /> Editar
-          </button>
+          {isBibliotecario && (
+            <button className="btn btn-soft" onClick={() => { closeModal(); onEdit(livro); }} disabled={!livro}>
+              <Icon name="edit" /> Editar
+            </button>
+          )}
         </div>
       </div>
     </>

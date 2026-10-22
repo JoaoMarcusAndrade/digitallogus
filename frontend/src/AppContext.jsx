@@ -1,5 +1,5 @@
 /* ============================================================
-   BiblioGestor — Contexto global da aplicação
+   Alexandria — Contexto global da aplicação
    ============================================================ */
 
 import { createContext, useCallback, useContext, useState } from 'react';
@@ -9,6 +9,7 @@ const AppContext = createContext(null);
 export function AppProvider({ children }) {
   const [detailRequest, setDetailRequest] = useState(null); // { page, id, ts }
   const [loanRequest, setLoanRequest] = useState(null); // { ts } gatilho para abrir modal de empréstimo
+  const [dataVersion, setDataVersion] = useState(0); // contador de recarregamento dos dados da API
 
   const openDetail = useCallback((page, id) => {
     setDetailRequest({ page, id, ts: Date.now() });
@@ -18,7 +19,12 @@ export function AppProvider({ children }) {
     setLoanRequest({ ts: Date.now() });
   }, []);
 
-  const value = { openDetail, detailRequest, openLoan, loanRequest };
+  /** Avisa as páginas de que os dados mudaram (após criar/editar/excluir). */
+  const reloadData = useCallback(() => {
+    setDataVersion((v) => v + 1);
+  }, []);
+
+  const value = { openDetail, detailRequest, openLoan, loanRequest, dataVersion, reloadData };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }

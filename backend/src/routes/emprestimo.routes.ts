@@ -62,8 +62,8 @@ router.post('/', emprestimoController.create);
  * @swagger
  * /api/emprestimos:
  *   get:
- *     summary: Lista todos os empréstimos (bibliotecário)
- *     description: Retorna todos os registros com dados do leitor e do livro.
+ *     summary: Lista os empréstimos (bibliotecário)
+ *     description: Retorna os registros com dados do leitor e do livro, com busca textual (leitor ou livro), filtro por status efetivo (ativo | atrasado | devolvido) e paginação no servidor.
  *     tags:
  *       - Empréstimos
  *     parameters:
@@ -74,9 +74,45 @@ router.post('/', emprestimoController.create);
  *         schema:
  *           type: integer
  *         example: 1
+ *       - in: query
+ *         name: q
+ *         required: false
+ *         description: Termo de busca (nome do leitor, usuário, matrícula, título ou autor)
+ *         schema:
+ *           type: string
+ *         example: "david"
+ *       - in: query
+ *         name: status
+ *         required: false
+ *         description: Filtra pelo status efetivo do empréstimo
+ *         schema:
+ *           type: string
+ *           enum: [ativo, atrasado, devolvido]
+ *         example: "atrasado"
+ *       - in: query
+ *         name: userId
+ *         required: false
+ *         description: Filtra os empréstimos de um leitor específico
+ *         schema:
+ *           type: integer
+ *         example: 2
+ *       - in: query
+ *         name: page
+ *         required: false
+ *         description: Página atual (padrão 1)
+ *         schema:
+ *           type: integer
+ *         example: 1
+ *       - in: query
+ *         name: perPage
+ *         required: false
+ *         description: Itens por página (padrão 8)
+ *         schema:
+ *           type: integer
+ *         example: 8
  *     responses:
  *       '200':
- *         description: Lista de empréstimos
+ *         description: Página de empréstimos no envelope { items, total, page, perPage, pages }
  *       '403':
  *         description: Acesso negado
  */
@@ -87,7 +123,7 @@ router.get('/', emprestimoController.selectAll);
  * /api/emprestimos/me:
  *   get:
  *     summary: Empréstimos do próprio leitor
- *     description: Retorna os empréstimos de um leitor específico (passado via ?userId=).
+ *     description: Retorna os empréstimos de um leitor específico (passado via ?userId=), com busca, filtro por status e paginação.
  *     tags:
  *       - Empréstimos
  *     parameters:
@@ -98,11 +134,42 @@ router.get('/', emprestimoController.selectAll);
  *         schema:
  *           type: integer
  *         example: 2
+ *       - in: query
+ *         name: q
+ *         required: false
+ *         description: Termo de busca (título ou autor do livro)
+ *         schema:
+ *           type: string
+ *         example: "dom casmurro"
+ *       - in: query
+ *         name: status
+ *         required: false
+ *         description: Filtra pelo status efetivo do empréstimo
+ *         schema:
+ *           type: string
+ *           enum: [ativo, atrasado, devolvido]
+ *         example: "ativo"
+ *       - in: query
+ *         name: page
+ *         required: false
+ *         description: Página atual (padrão 1)
+ *         schema:
+ *           type: integer
+ *         example: 1
+ *       - in: query
+ *         name: perPage
+ *         required: false
+ *         description: Itens por página (padrão 8)
+ *         schema:
+ *           type: integer
+ *         example: 8
  *     responses:
  *       '200':
- *         description: Lista de empréstimos do leitor
+ *         description: Página de empréstimos do leitor
  *       '400':
  *         description: userId inválido
+ *       '404':
+ *         description: Usuário não encontrado
  */
 router.get('/me', emprestimoController.selectMine);
 

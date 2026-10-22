@@ -19,17 +19,25 @@ const router = Router();
  *             type: object
  *             required:
  *               - name
- *               - CEP
- *               - telephone
+ *               - cep
+ *               - numero
  *               - email
  *               - pass
  *             properties:
  *               name:
  *                 type: string
  *                 example: "João Silva"
- *               CEP:
+ *               cep:
  *                 type: string
- *                 example: "01310-200"
+ *                 description: "CEP (8 dígitos). Obrigatório — o endereço é preenchido via ViaCEP."
+ *                 example: "01310200"
+ *               numero:
+ *                 type: string
+ *                 description: "Número do endereço. Obrigatório."
+ *                 example: "250"
+ *               complemento:
+ *                 type: string
+ *                 example: "Apto 41"
  *               telephone:
  *                 type: string
  *                 example: "11999998888"
@@ -41,9 +49,11 @@ const router = Router();
  *                 example: "minhaSenh4!"
  *     responses:
  *       '201':
- *         description: Usuário cadastrado com sucesso.
+ *         description: Usuário cadastrado com sucesso (matrícula gerada automaticamente).
  *       '400':
  *         description: Dados inválidos ou e-mail já cadastrado.
+ *       '404':
+ *         description: CEP não encontrado.
  */
 router.post("/register", leitorController.create);
 
@@ -52,7 +62,7 @@ router.post("/register", leitorController.create);
  * /api/users/login:
  *   post:
  *     summary: Login do usuário
- *     description: Autentica o usuário validando email e senha.
+ *     description: Autentica o usuário validando o e-mail e a senha.
  *     tags:
  *       - Autenticação
  *     requestBody:
@@ -67,7 +77,12 @@ router.post("/register", leitorController.create);
  *             properties:
  *               email:
  *                 type: string
- *                 example: "joao@email.com"
+ *                 description: E-mail cadastrado (é o login do sistema).
+ *                 example: "admin@biblio.com"
+ *               user:
+ *                 type: string
+ *                 description: Alias legado de `email`.
+ *                 example: "admin@biblio.com"
  *               pass:
  *                 type: string
  *                 example: "minhaSenh4!"
@@ -75,13 +90,178 @@ router.post("/register", leitorController.create);
  *       '200':
  *         description: Login realizado com sucesso. Retorna os dados do usuário.
  *       '401':
- *         description: Email ou senha inválidos.
+ *         description: E-mail ou senha inválidos.
  */
 router.post("/login", leitorController.login);
 
 // --- Rotas de Gerenciamento de Usuários ---
 
+/**
+ * @swagger
+ * /api/users:
+ *   get:
+ *     summary: Lista os usuários (bibliotecário)
+ *     description: Retorna os usuários cadastrados com busca, filtros e paginação no servidor. Acesso restrito ao bibliotecário (admId).
+ *     tags:
+ *       - Usuários
+ *     parameters:
+ *       - in: query
+ *         name: admId
+ *         required: true
+ *         description: ID do usuário bibliotecário
+ *         schema:
+ *           type: integer
+ *         example: 1
+ *       - in: query
+ *         name: q
+ *         required: false
+ *         description: Termo de busca (nome, e-mail, usuário ou matrícula)
+ *         schema:
+ *           type: string
+ *         example: "david"
+ *       - in: query
+ *         name: status
+ *         required: false
+ *         description: Filtra por status do usuário
+ *         schema:
+ *           type: string
+ *           enum: [ativo, inativo]
+ *         example: "ativo"
+ *       - in: query
+ *         name: tipo
+ *         required: false
+ *         description: Filtra por perfil de acesso
+ *         schema:
+ *           type: string
+ *           enum: [leitor, bibliotecario]
+ *         example: "leitor"
+ *       - in: query
+ *         name: page
+ *         required: false
+ *         description: Página atual (padrão 1)
+ *         schema:
+ *           type: integer
+ *         example: 1
+ *       - in: query
+ *         name: perPage
+ *         required: false
+ *         description: Itens por página (padrão 8)
+ *         schema:
+ *           type: integer
+ *         example: 8
+ *     responses:
+ *       '200':
+ *         description: Página de usuários no envelope { items, total, page, perPage, pages }
+ *       '400':
+ *         description: admId inválido
+ *       '403':
+ *         description: Acesso negado
+ */
 router.get('/', leitorController.selectAll);
+
+/**
+ * @swagger
+ * /api/users:
+ *   post:
+ *     summary: Cadastra um usuário (bibliotecário)
+ *     description: Cria um usuário com perfil de acesso ("leitor" | "bibliotecario"). Sem o campo "pass", a conta recebe uma senha provisória, retornada na resposta.
+ *     tags:
+ *       - Usuários
+ *     parameters:
+ *       - in: query
+ *         name: admId
+ *         required: true
+ *         description: ID do usuário bibliotecário
+ *         schema:
+ *           type: integer
+ *         example: 1
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - name
+ *               - email
+ *               - cep
+ *               - numero
+ *             properties:
+ *               name:
+ *                 type: string
+ *                 example: "David Souza"
+ *               cep:
+ *                 type: string
+ *                 description: "CEP (8 dígitos). Obrigatório — o endereço é preenchido via ViaCEP."
+ *                 example: "01310200"
+ *               numero:
+ *                 type: string
+ *                 description: "Número do endereço. Obrigatório."
+ *                 example: "250"
+ *               complemento:
+ *                 type: string
+ *                 example: "Apto 41"
+ *               email:
+ *                 type: string
+ *                 example: "david.souza@email.com"
+ *               matricula:
+ *                 type: string
+ *                 example: "2023001201"
+ *               telefone:
+ *                 type: string
+ *                 example: "11987654321"
+ *               CEP:
+ *                 type: string
+ *                 example: "01310200"
+ *               pass:
+ *                 type: string
+ *                 description: Senha inicial (omitir para gerar senha provisória)
+ *                 example: "minhaSenh4!"
+ *               userLevel:
+ *                 type: string
+ *                 enum: [leitor, bibliotecario]
+ *                 example: "leitor"
+ *               status:
+ *                 type: string
+ *                 enum: [ativo, inativo]
+ *                 example: "ativo"
+ *     responses:
+ *       '201':
+ *         description: Usuário criado (quando a senha não foi informada, ela é enviada por e-mail)
+ *       '400':
+ *         description: Dados inválidos ou e-mail/matrícula já cadastrado
+ *       '403':
+ *         description: Acesso negado
+ *       '404':
+ *         description: Administrador não encontrado
+ */
+router.post('/', leitorController.createAsLibrarian);
+
+/**
+ * @swagger
+ * /api/users/cep/{cep}:
+ *   get:
+ *     summary: Consulta o endereço a partir do CEP
+ *     description: Usa a API pública ViaCEP para devolver rua, bairro, cidade, estado e o CEP normalizado.
+ *     tags:
+ *       - Usuários
+ *     parameters:
+ *       - in: path
+ *         name: cep
+ *         required: true
+ *         description: CEP (8 dígitos, com ou sem hífen)
+ *         schema:
+ *           type: string
+ *           example: "01310100"
+ *     responses:
+ *       '200':
+ *         description: Endereço encontrado
+ *       '400':
+ *         description: CEP inválido
+ *       '404':
+ *         description: CEP não encontrado
+ */
+router.get('/cep/:cep', leitorController.buscarCep);
 
 router.get('/:userId', leitorController.select);
 

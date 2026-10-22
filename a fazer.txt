@@ -1,0 +1,11 @@
+colocar logo no sistema
+perguntar:
+ - vai obrigar a mudar a senha na primeira entrada? só se a pessoa quiser
+ - vai ter como colocar foto de perfil? não
+
+feito:
+ - tirar o status e historico dos livros na parte do leitor
+ - senha provisória enviada por e-mail (sem Redis, cache em memória)
+ - login somente por e-mail (sem username)
+ - primeiro nome para o leitor / nome completo para o bibliotecário
+ - histórico de livro restrito ao bibliotecário (admId na API)

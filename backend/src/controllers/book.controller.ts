@@ -7,6 +7,7 @@ import {
   getAllBooks,
   getBook,
   getBookHistory,
+  getCategories,
   createBook,
   updateBook,
   deleteBook
@@ -23,13 +24,24 @@ function handleError(res: Response, error: any) {
 
 export const bookController = {
 
-  /** GET /api/livros — lista todos os livros */
+  /** GET /api/livros — lista o acervo com busca, filtros e paginação */
   async selectAll(req: Request, res: Response): Promise<Response> {
     try {
-      const books = await getAllBooks();
+      const { q, category, categoria, status, page, perPage } = req.query as Record<string, any>;
+      const books = await getAllBooks({ q, category, categoria, status, page, perPage });
       return res.status(200).json(books);
     } catch (error: any) {
-      return res.status(500).json({ error: error.message });
+      return handleError(res, error);
+    }
+  },
+
+  /** GET /api/livros/categorias — categorias do acervo com contagem */
+  async categories(req: Request, res: Response): Promise<Response> {
+    try {
+      const result = await getCategories();
+      return res.status(200).json(result);
+    } catch (error: any) {
+      return handleError(res, error);
     }
   },
 
@@ -50,17 +62,25 @@ export const bookController = {
     }
   },
 
-  /** GET /api/livros/:bookId/history — histórico de empréstimos do livro */
+  /**
+   * GET /api/livros/:bookId/history?admId= — histórico de empréstimos do livro.
+   * Restrito ao bibliotecário: o leitor não precisa saber quem pegou o livro.
+   */
   async history(req: Request, res: Response): Promise<Response> {
     const { bookId } = req.params;
     const bookIdNum = Number(bookId);
+    const admId = Number(req.query.admId);
 
     if (isNaN(bookIdNum)) {
       return res.status(400).json({ error: "O ID do livro é inválido." });
     }
 
+    if (isNaN(admId)) {
+      return res.status(400).json({ error: "O parâmetro admId é obrigatório e deve ser um número válido." });
+    }
+
     try {
-      const records = await getBookHistory(bookIdNum);
+      const records = await getBookHistory(admId, bookIdNum);
       return res.status(200).json(records);
     } catch (error: any) {
       return handleError(res, error);

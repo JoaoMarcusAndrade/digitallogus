@@ -3,17 +3,22 @@ import sequelize from "../database/index.js";
 
 
 class User extends Model<
-  InferAttributes<User>,
-  InferCreationAttributes<User>
+    InferAttributes<User>,
+    InferCreationAttributes<User>
 > {
-  declare id: CreationOptional<number>;
-  declare name: string;
-  declare CEP: string;
-  declare telefone: string;
-  declare email: string;
-  declare userLevel: 'leitor' | 'bibliotecario';
-  declare status: 'apto' | 'inapto';
-  declare pass_hash: string;
+    declare id: CreationOptional<number>;
+    declare name: string;
+    /** Matrícula institucional do leitor (opcional). */
+    declare matricula: CreationOptional<string | null>;
+    /** CEP — opcional: o cadastro feito pelo bibliotecário não exige endereço. */
+    declare CEP: CreationOptional<string>;
+    declare telefone: CreationOptional<string>;
+    declare email: string;
+    declare userLevel: 'leitor' | 'bibliotecario';
+    declare status: 'apto' | 'inapto';
+    declare pass_hash: string;
+    declare createdAt: CreationOptional<Date>;
+    declare updatedAt: CreationOptional<Date>;
 }
 
 
@@ -30,25 +35,36 @@ User.init({
         allowNull: false
     },
 
+    matricula: {
+        type: DataTypes.STRING(40),
+        allowNull: true,
+        unique: true
+    },
+
     CEP: {
         type: DataTypes.STRING(9),
         allowNull: false,
         validate: {
-            is: {
-                args: /^([0-9]{8}|[0-9]{5}-[0-9]{3})$/,
-                msg: "Formato de CEP inválido. Use 12345678 ou 12345-678."
+            cepValido(value: string) {
+                if (!value) return;
+                const digitos = String(value).replace(/\D/g, "");
+                if (digitos.length !== 8) {
+                    throw new Error("Formato de CEP inválido. Use 12345678 ou 12345-678.");
+                }
             }
         }
     },
 
     telefone: {
-        type: DataTypes.STRING(11),
+        type: DataTypes.STRING(20),
         allowNull: false,
+        defaultValue: "",
         validate: {
-            is: {
-                // Aceita fixos (10 dígitos) ou celulares (11 dígitos) com DDD
-                args: /^[1-9]{2}9?[0-9]{8}$/,
-                msg: "O telefone deve conter apenas números com o DDD (ex: 11999998888)."
+            telefoneValido(value: string) {
+                if (!value) return;
+                if (!/^[1-9][0-9]{9,10}$/.test(value)) {
+                    throw new Error("O telefone deve conter apenas números com o DDD (ex.: 11999998888).");
+                }
             }
         }
     },
@@ -58,7 +74,7 @@ User.init({
         allowNull: false,
         validate: {
             isEmail: {
-                msg: "O formato inserido é inválido." //mensagem de erro caso não seja um email
+                msg: "O formato inserido é inválido." //mensagem de erro caso seja um email
             }
         }
     },
@@ -78,6 +94,16 @@ User.init({
         type: DataTypes.ENUM('apto','inapto'),
         allowNull: false,
         defaultValue: 'apto'
+    },
+
+    createdAt: {
+        type: DataTypes.DATE,
+        allowNull: true
+    },
+
+    updatedAt: {
+        type: DataTypes.DATE,
+        allowNull: true
     }
 
 }, {

@@ -1,84 +1,82 @@
 /* ============================================================
-   BiblioGestor — Página: Empréstimos
+   Alexandria — Página: Empréstimos (circulação)
    ============================================================ */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Icon } from '../ui/icons.jsx';
 import { useModal, useToast, ModalHead, Field, StatusBadge } from '../ui/Modal.jsx';
 import { useApp } from '../AppContext.jsx';
-import {
-  useStore, emprestimos, emprestar, devolver, renovar,
-  usuario, livro, usuarios, livros
-} from '../store/store.js';
+import { useSession } from '../store/session.jsx';
+import api from '../api/client.js';
+import { useApi } from '../api/useApi.js';
+import { useDebounce } from '../api/useDebounce.js';
+import { corPara } from '../ui/labels.js';
 import { Pagination, EmptyRow } from '../ui/common.jsx';
 import { initials, fmtDate, diffDias } from '../ui/format.js';
 
 const STATUS_OPTIONS = [
   ['', 'Todos os status'],
-  ['ativo', 'Ativos'],
-  ['atrasado', 'Atrasados'],
-  ['devolvido', 'Devolvidos']
+  ['active', 'Ativos'],
+  ['overdue', 'Atrasados'],
+  ['returned', 'Devolvidos']
 ];
 
+const PER_PAGE = 10;
+
 export function Emprestimos() {
-  useStore();
+  const { admId } = useSession();
   const { openModal, confirmBox } = useModal();
   const toast = useToast();
+  const { loanRequest, dataVersion, reloadData } = useApp();
 
   const [q, setQ] = useState('');
   const [status, setStatus] = useState('');
   const [page, setPage] = useState(1);
-  const perPage = 10;
+  const qBusca = useDebounce(q, 300);
 
-  const lista = useMemo(() => {
-    const query = q.trim().toLowerCase();
-    return emprestimos().map((e) => {
-      let atrasado = false;
-      if (e.status !== 'devolvido') atrasado = new Date(e.dataDevolucaoPrevista) < new Date();
-      return { e, atrasado };
-    }).filter(({ e, atrasado }) => {
-      const u = usuario(e.usuarioId);
-      const l = livro(e.livroId);
-      const texto = ((u ? u.nome : '') + ' ' + (l ? l.titulo : '')).toLowerCase();
-      if (query && !texto.includes(query)) return false;
-      const st = e.status === 'devolvido' ? 'devolvido' : (atrasado ? 'atrasado' : 'ativo');
-      if (status && st !== status) return false;
-      return true;
-    });
-  }, [q, status]);
+  const { data: pagina, loading, erro } = useApi(
+    async () => api.listLoans({ admId, q: qBusca, status, page, perPage: PER_PAGE }),
+    [admId, qBusca, status, page, dataVersion]
+  );
 
-  const pages = Math.max(1, Math.ceil(lista.length / perPage));
-  const safePage = Math.min(page, pages);
-  const ini = (safePage - 1) * perPage;
-  const slice = lista.slice(ini, ini + perPage);
+  const itens = pagina?.items || [];
+  const total = pagina?.total ?? 0;
+  const pages = pagina?.pages || 1;
+  const ini = (Math.min(page, pages) - 1) * PER_PAGE;
 
-  const { loanRequest } = useApp();
   useEffect(() => {
     if (loanRequest) openModalEmprestar();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loanRequest]);
 
   const openModalEmprestar = () => {
-    openModal(<EmprestarForm />, 'md');
+    openModal(<EmprestarForm onSaved={reloadData} />, 'md');
   };
 
-  const devolverEmp = (id) => {
-    const e = emprestimos().find((x) => x.id === id);
-    const l = livro(e.livroId);
-    const u = usuario(e.usuarioId);
+  const devolverEmp = (e) => {
     confirmBox(
-      'Registrar devolução de <b>' + (l ? l.titulo : '') + '</b> (usuário: ' + (u ? u.nome : '') + ')?',
-      () => {
-        const r = devolver(id);
-        toast(r.ok ? 'Devolução registrada.' : r.msg, r.ok ? 'success' : 'warn');
+      'Registrar devolução de <b>' + (e.book ? e.book.title : '') + '</b> (usuário: ' + (e.reader ? e.reader.name : '') + ')?',
+      async () => {
+        try {
+          await api.returnLoan(admId, e.id);
+          toast('Devolução registrada.', 'success');
+          reloadData();
+        } catch (err) {
+          toast(err.message || 'Não foi possível registrar a devolução.', 'warn');
+        }
       },
       { title: 'Registrar devolução', okText: 'Confirmar' }
     );
   };
 
-  const renovarEmp = (id) => {
-    const r = renovar(id);
-    toast(r.ok ? 'Empréstimo renovado por +7 dias.' : r.msg, r.ok ? 'success' : 'warn');
+  const renovarEmp = async (e) => {
+    try {
+      await api.renewLoan(admId, e.id);
+      toast('Empréstimo renovado por +7 dias.', 'success');
+      reloadData();
+    } catch (err) {
+      toast(err.message || 'Não foi possível renovar o empréstimo.', 'warn');
+    }
   };
 
   return (
@@ -96,6 +94,13 @@ export function Emprestimos() {
         </div>
       </div>
 
+      {erro && (
+        <div className="alert alert-danger" style={{ marginBottom: 16 }}>
+          <Icon name="close" />
+          <div><b>Não foi possível carregar os empréstimos</b><span>{erro}</span></div>
+        </div>
+      )}
+
       <div className="card">
         <div className="toolbar">
           <div className="toolbar-search">
@@ -110,39 +115,48 @@ export function Emprestimos() {
           <select className="select" value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }}>
             {STATUS_OPTIONS.map(([v, t]) => <option key={v} value={v}>{t}</option>)}
           </select>
-          <span className="result-count">{lista.length} registro{lista.length !== 1 ? 's' : ''}</span>
+          <span className="result-count">{total} registro{total !== 1 ? 's' : ''}</span>
         </div>
 
         <div className="table-wrap">
           <table className="table">
             <thead>
               <tr>
-                <th>Obra</th><th>Usuário</th><th>Emprestado em</th><th>Prevista</th>
+                <th>Obra</th><th>Leitor</th><th>Emprestado em</th><th>Prevista</th>
                 <th>Prazo</th><th>Status</th><th style={{ textAlign: 'right' }}>Ações</th>
               </tr>
             </thead>
             <tbody>
-              {slice.length ? slice.map((p) => <EmprestimoRow key={p.e.id} {...p} onDevolver={devolverEmp} onRenovar={renovarEmp} />)
-                : <EmptyRow icon="loans" text="Nenhum empréstimo encontrado." colspan={7} />}
+              {loading && !itens.length
+                ? <EmptyRow icon="loans" text="Carregando..." colspan={7} />
+                : itens.length
+                  ? itens.map((e) => (
+                    <EmprestimoRow
+                      key={e.id}
+                      e={e}
+                      onDevolver={() => devolverEmp(e)}
+                      onRenovar={() => renovarEmp(e)}
+                    />
+                  ))
+                  : <EmptyRow icon="loans" text="Nenhum empréstimo encontrado." colspan={7} />}
             </tbody>
           </table>
         </div>
 
-        <Pagination ini={ini} total={lista.length} perPage={perPage} page={safePage} onPage={setPage} />
+        <Pagination ini={ini} total={total} perPage={PER_PAGE} page={Math.min(page, pages)} onPage={setPage} />
       </div>
     </div>
   );
 }
 
-function EmprestimoRow({ e, atrasado, onDevolver, onRenovar }) {
-  const u = usuario(e.usuarioId);
-  const l = livro(e.livroId);
-  const st = e.status === 'devolvido' ? 'devolvido' : (atrasado ? 'atrasado' : 'ativo');
+function EmprestimoRow({ e, onDevolver, onRenovar }) {
+  const u = e.reader;
+  const b = e.book;
   const dias = diffDias(e.dataDevolucaoPrevista);
 
   let prazo;
-  if (e.status === 'devolvido') prazo = <span style={{ color: 'var(--text-3)' }}>devolvido em {fmtDate(e.dataDevolucao)}</span>;
-  else if (atrasado) prazo = <b style={{ color: 'var(--red)' }}>{Math.abs(dias)} dia{Math.abs(dias) !== 1 ? 's' : ''} de atraso</b>;
+  if (e.status === 'returned') prazo = <span style={{ color: 'var(--text-3)' }}>devolvido em {fmtDate(e.dataDevolucao)}</span>;
+  else if (e.status === 'overdue') prazo = <b style={{ color: 'var(--red)' }}>{Math.abs(dias)} dia{Math.abs(dias) !== 1 ? 's' : ''} de atraso</b>;
   else if (dias <= 3) prazo = <b style={{ color: 'var(--amber)' }}>vence em {dias}d</b>;
   else prazo = <span style={{ color: 'var(--text-3)' }}>vence em {dias}d</span>;
 
@@ -150,17 +164,19 @@ function EmprestimoRow({ e, atrasado, onDevolver, onRenovar }) {
     <tr>
       <td>
         <div className="cell-book">
-          <div className="book-cover" style={{ background: l ? l.capa : '#94a3b8' }}>{(l ? l.titulo : '?').charAt(0)}</div>
+          <div className="book-cover" style={{ background: b ? (b.coverColor || corPara(b.title)) : '#94a3b8' }}>
+            {b ? b.title.charAt(0) : '?'}
+          </div>
           <div className="cell-title">
-            <b>{l ? l.titulo : 'Título removido'}</b>
-            <span>{l ? l.autor : ''}</span>
+            <b>{b ? b.title : 'Título removido'}</b>
+            <span>{b ? b.author : ''}</span>
           </div>
         </div>
       </td>
       <td>
         <div className="cell-user">
-          <div className="avatar-sm" style={{ background: u ? (u.color || '#64748b') : '#94a3b8' }}>{u ? initials(u.nome) : '?'}</div>
-          <div className="cell-title"><b>{u ? u.nome : '—'}</b><span>{u ? u.matricula : ''}</span></div>
+          <div className="avatar-sm" style={{ background: u ? corPara(u.name) : '#94a3b8' }}>{u ? initials(u.name) : '?'}</div>
+          <div className="cell-title"><b>{u ? u.name : '—'}</b><span>{u ? u.matricula : ''}</span></div>
         </div>
       </td>
       <td>{fmtDate(e.dataEmprestimo)}</td>
@@ -169,13 +185,13 @@ function EmprestimoRow({ e, atrasado, onDevolver, onRenovar }) {
         <span style={{ display: 'block', fontSize: '11.5px', color: 'var(--text-3)' }}>{e.renovacoes} renov.</span>
       </td>
       <td>{prazo}</td>
-      <td><StatusBadge status={st} /></td>
+      <td><StatusBadge status={e.status} /></td>
       <td>
         <div className="row-actions">
-          {e.status !== 'devolvido' && (
+          {e.status !== 'returned' && (
             <>
-              <button className="row-action" onClick={() => onRenovar(e.id)} title="Renovar (até 2x)"><Icon name="calendar" /></button>
-              <button className="row-action" onClick={() => onDevolver(e.id)} title="Registrar devolução"><Icon name="check" /></button>
+              <button className="row-action" onClick={onRenovar} title="Renovar (até 2x)"><Icon name="calendar" /></button>
+              <button className="row-action" onClick={onDevolver} title="Registrar devolução"><Icon name="check" /></button>
             </>
           )}
         </div>
@@ -184,23 +200,48 @@ function EmprestimoRow({ e, atrasado, onDevolver, onRenovar }) {
   );
 }
 
-function EmprestarForm() {
+function EmprestarForm({ onSaved }) {
   const { closeModal } = useModal();
   const toast = useToast();
+  const { admId } = useSession();
+
   const [usuarioId, setUsuarioId] = useState('');
   const [livroId, setLivroId] = useState('');
   const [dias, setDias] = useState(14);
+  const [salvando, setSalvando] = useState(false);
 
-  const submit = (e) => {
+  const { data: usuarios } = useApi(async () => {
+    const pagina = await api.listUsers({ admId, perPage: 100 });
+    return pagina.items.filter((u) => u.status === 'ativo');
+  }, [admId]);
+
+  const { data: livros } = useApi(async () => {
+    const pagina = await api.listBooks({ perPage: 100 });
+    return pagina.items;
+  }, []);
+
+  const userOps = usuarios || [];
+  const bookOps = livros || [];
+
+  const submit = async (e) => {
     e.preventDefault();
-    if (!usuarioId || !livroId) { toast('Selecione o usuário e a obra.', 'warn'); return; }
-    const r = emprestar(usuarioId, livroId, Number(dias) || 14);
-    if (r.ok) { toast('Empréstimo registrado com sucesso.', 'success'); closeModal(); }
-    else toast(r.msg, 'warn');
-  };
+    if (!usuarioId || !livroId) {
+      toast('Selecione o usuário e a obra.', 'warn');
+      return;
+    }
 
-  const userOps = usuarios().filter((u) => u.status === 'ativo');
-  const bookOps = livros();
+    setSalvando(true);
+    try {
+      await api.createLoan(admId, { bookId: Number(livroId), userId: Number(usuarioId), dias: Number(dias) || 14 });
+      toast('Empréstimo registrado com sucesso.', 'success');
+      onSaved?.();
+      closeModal();
+    } catch (err) {
+      toast(err.message || 'Não foi possível registrar o empréstimo.', 'warn');
+    } finally {
+      setSalvando(false);
+    }
+  };
 
   return (
     <>
@@ -212,7 +253,7 @@ function EmprestarForm() {
               <select className="select" style={{ width: '100%' }} value={usuarioId} onChange={(e) => setUsuarioId(e.target.value)} required>
                 <option value="" disabled>Selecione o usuário...</option>
                 {userOps.map((u) => (
-                  <option key={u.id} value={u.id}>{u.nome} ({u.matricula})</option>
+                  <option key={u.id} value={u.id}>{u.name} ({u.matricula || u.email})</option>
                 ))}
               </select>
             </Field>
@@ -220,8 +261,8 @@ function EmprestarForm() {
               <select className="select" style={{ width: '100%' }} value={livroId} onChange={(e) => setLivroId(e.target.value)} required>
                 <option value="" disabled>Selecione a obra...</option>
                 {bookOps.map((l) => (
-                  <option key={l.id} value={l.id} disabled={l.exemplaresDisp <= 0}>
-                    {l.titulo} — {l.autor}{l.exemplaresDisp <= 0 ? ' (esgotado)' : ` (${l.exemplaresDisp} disp.)`}
+                  <option key={l.id} value={l.id} disabled={l.quantityAvailable <= 0}>
+                    {l.title} — {l.author}{l.quantityAvailable <= 0 ? ' (esgotado)' : ` (${l.quantityAvailable} disp.)`}
                   </option>
                 ))}
               </select>
@@ -232,7 +273,9 @@ function EmprestarForm() {
           </div>
           <div className="form-actions">
             <button type="button" className="btn" onClick={closeModal}>Cancelar</button>
-            <button type="submit" className="btn btn-primary"><Icon name="check" /> Registrar empréstimo</button>
+            <button type="submit" className="btn btn-primary" disabled={salvando}>
+              {salvando ? 'Registrando...' : <><Icon name="check" /> Registrar empréstimo</>}
+            </button>
           </div>
         </div>
       </form>

@@ -4,24 +4,24 @@ import Book from "./Book.js";
 import User from "./User.js";
 
 /**
- * Modelo de Histórico de Empréstimo.
+ * Modelo de Histórico do usuário.
  *
- * Registra a movimentação de um exemplar de livro:
- *  - dataEmprestimo:       quando o exemplar "entrou" com o leitor (entrada)
- *  - dataDevolucaoPrevista: prazo esperado para devolução
- *  - dataDevolucao:        quando o exemplar "saiu"/foi devolvido (saída) — null enquanto ativo
- *  - renovacoes:           quantas vezes o prazo foi renovado
- *  - status:               ativo | devolvido | atrasado
+ * Guarda as **movimentações** de cada usuário com livros (auditoria):
+ *  - acao:                emprestar | devolver | renovar
+ *  - emprestimoId:        FK para o empréstimo correspondente (Emprestimo)
+ *  - bookId/userId:       relações com livro e usuário
+ *  - dataEmprestimo/dataDevolucaoPrevista/dataDevolucao/renovacoes/status:
+ *                         cópia do estado do empréstimo no momento do evento
  *
- * Relacionamentos (em models/index.ts):
- *  - Book.hasMany(History) / History.belongsTo(Book)
- *  - User.hasMany(History) / History.belongsTo(User)
+ * O empréstimo em si vive na tabela `emprestimos` (modelo Emprestimo).
  */
 class History extends Model<
   InferAttributes<History>,
   InferCreationAttributes<History>
 > {
   declare id: CreationOptional<number>;
+  declare acao: CreationOptional<'emprestar' | 'devolver' | 'renovar'>;
+  declare emprestimoId: CreationOptional<number | null>;
   declare bookId: number;                       // FK para Book
   declare userId: number;                       // FK para User (leitor)
   declare dataEmprestimo: Date;                 // entrada
@@ -30,7 +30,7 @@ class History extends Model<
   declare renovacoes: CreationOptional<number>;
   declare status: 'ativo' | 'devolvido' | 'atrasado';
 
-  declare book?: NonAttribute<Book>;
+  declare livro?: NonAttribute<Book>;
   declare user?: NonAttribute<User>;
 }
 
@@ -39,6 +39,20 @@ History.init({
     type: DataTypes.INTEGER,
     autoIncrement: true,
     primaryKey: true
+  },
+
+  acao: {
+    type: DataTypes.STRING(20),
+    allowNull: true
+  },
+
+  emprestimoId: {
+    type: DataTypes.INTEGER,
+    allowNull: true,
+    references: {
+      model: "emprestimos",
+      key: "id"
+    }
   },
 
   bookId: {

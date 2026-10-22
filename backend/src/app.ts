@@ -6,15 +6,22 @@ import cors from "cors"
 import { fileURLToPath } from "url";
 import { router } from "./routes/index.routes.js";
 import sequelize from "./database/index.js";
+import { runMigrations } from "./database/migrate.js";
 import "./models/index.js";
 export const app = express();
 
 export const __filename = fileURLToPath(import.meta.url);
 export const _dirname = path.dirname(__filename);
 
-sequelize.sync()
+// Aplica as migrações pendentes (colunas novas) e só então sincroniza o schema.
+// O sync() sozinho não altera tabelas que já existem no SQLite.
+runMigrations()
+    .then(() => sequelize.sync())
     .then(() => {
         console.log("Banco sincronizado");
+    })
+    .catch((error) => {
+        console.error("Falha ao preparar o banco:", error.message);
     });
 
 app.use(cors())

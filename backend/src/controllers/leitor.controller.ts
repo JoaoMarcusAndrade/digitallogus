@@ -7,6 +7,16 @@ import {
     editUser,
     delUser
 } from "../services/leitor.service.js";
+import { requireLibrarian } from "../utils/auth.js";
+import { buscarEnderecoPorCep } from "../utils/viacep.js";
+
+/**
+ * Tratamento central de erro: respeita o statusCode definido nos serviços.
+ */
+function handleError(res: Response, error: any) {
+    const status = error?.statusCode || 400;
+    return res.status(status).json({ error: error.message });
+}
 
 export const leitorController = {
 
@@ -15,31 +25,63 @@ export const leitorController = {
             const user = await createUser(req.body);
             return res.status(201).json(user);
         } catch (error: any) {
-            return res.status(400).json({ error: error.message });
+            return handleError(res, error);
+        }
+    },
+
+    /**
+     * POST /api/leitor?admId= — cria um usuário (bibliotecário).
+     * Aceita `userLevel` ("leitor" | "bibliotecario") e `status` ("ativo" | "inativo").
+     * Sem `pass` no corpo, a conta recebe uma senha provisória enviada por e-mail.
+     */
+    async createAsLibrarian(req: Request, res: Response): Promise<Response> {
+        const admId = Number(req.query.admId);
+
+        if (isNaN(admId)) {
+            return res.status(400).json({ error: "O parâmetro admId é obrigatório e deve ser um número válido." });
+        }
+
+        try {
+            // A autorização é validada antes de criar (nível elevado exige bibliotecário).
+            await requireLibrarian(admId);
+            const user = await createUser(req.body, { permitirNivelElevado: true });
+            return res.status(201).json(user);
+        } catch (error: any) {
+            return handleError(res, error);
         }
     },
 
     async login(req: Request, res: Response): Promise<Response> {
-        const { email, pass } = req.body;
+        // Login por e-mail ("user" é aceito como alias legado).
+        const { user, email, pass } = req.body;
+        const identificador = email || user;
 
-        if (!email || !pass) {
-            return res.status(400).json({ error: "Email e senha são obrigatórios." });
+        if (!identificador || !pass) {
+            return res.status(400).json({ error: "E-mail e senha são obrigatórios." });
         }
 
         try {
-            const result = await loginUser(email, pass);
+            const result = await loginUser(identificador, pass);
             return res.status(200).json(result);
         } catch (error: any) {
             return res.status(401).json({ error: error.message });
         }
     },
 
+    /** GET /api/leitor?admId= — lista usuários (bibliotecário) com filtros e paginação */
     async selectAll(req: Request, res: Response): Promise<Response> {
+        const admId = Number(req.query.admId);
+
+        if (isNaN(admId)) {
+            return res.status(400).json({ error: "O parâmetro admId é obrigatório e deve ser um número válido." });
+        }
+
         try {
-            const users = await getAllUsers();
+            const { q, status, tipo, page, perPage } = req.query as Record<string, any>;
+            const users = await getAllUsers(admId, { q, status, tipo, page, perPage });
             return res.status(200).json(users);
         } catch (error: any) {
-            return res.status(500).json({ error: error.message });
+            return handleError(res, error);
         }
     },
 
@@ -56,6 +98,20 @@ export const leitorController = {
             return res.status(200).json(user);
         } catch (error: any) {
             return res.status(404).json({ error: error.message });
+        }
+    },
+
+    /**
+     * GET /api/leitor/cep/:cep — consulta o endereço completo a partir do CEP.
+     */
+    async buscarCep(req: Request, res: Response): Promise<Response> {
+        const cep = String(req.params.cep || "");
+
+        try {
+            const endereco = await buscarEnderecoPorCep(cep);
+            return res.status(200).json(endereco);
+        } catch (error: any) {
+            return handleError(res, error);
         }
     },
 

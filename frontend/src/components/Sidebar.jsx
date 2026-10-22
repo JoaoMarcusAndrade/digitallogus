@@ -1,54 +1,65 @@
 /* ============================================================
-   BiblioGestor — Sidebar (React)
+   Alexandria — Sidebar (navegação por papel de acesso)
    ============================================================ */
 
 import { NavLink } from 'react-router-dom';
 import { Icon } from '../ui/icons.jsx';
-import { livros, usuarios, emprestimosAtrasados } from '../store/store.js';
-import { useStore } from '../store/store.js';
+import { useApp } from '../AppContext.jsx';
+import { useSession } from '../store/session.jsx';
+import api from '../api/client.js';
+import { useApi } from '../api/useApi.js';
+import { cargoUsuario, corPara } from '../ui/labels.js';
+import { initials } from '../ui/format.js';
 
-const NAV = [
+const NAV_BIBLIOTECARIO = [
   { label: 'Principal', items: [{ route: 'dashboard', icon: 'dashboard', text: 'Dashboard' }] },
   {
     label: 'Gestão',
     items: [
-      { route: 'acervo', icon: 'books', text: 'Acervo', badge: 'acervo' },
-      { route: 'usuarios', icon: 'users', text: 'Usuários', badge: 'usuarios' },
-      { route: 'emprestimos', icon: 'loans', text: 'Empréstimos', badge: 'atrasados' }
+      { route: 'acervo', icon: 'books', text: 'Acervo', badge: 'collection' },
+      { route: 'usuarios', icon: 'users', text: 'Usuários', badge: 'users' },
+      { route: 'emprestimos', icon: 'loans', text: 'Empréstimos', badge: 'overdue' }
     ]
-  },
+  }
+];
+
+const NAV_LEITOR = [
+  { label: 'Principal', items: [{ route: 'dashboard', icon: 'dashboard', text: 'Meu painel' }] },
   {
-    label: 'Consultas',
-    items: [{ route: 'relatorios', icon: 'reports', text: 'Relatórios' }]
+    label: 'Biblioteca',
+    items: [
+      { route: 'acervo', icon: 'books', text: 'Acervo', badge: 'collection' },
+      { route: 'meus-emprestimos', icon: 'loans', text: 'Meus empréstimos', badge: 'mine' }
+    ]
   }
 ];
 
 export function Sidebar({ open, onClose }) {
-  useStore();
-  const badgeAcervo = livros().length;
-  const badgeUser = usuarios().length;
-  const atrasados = emprestimosAtrasados().length;
+  const { user, isBibliotecario, admId, userId, logout, exibirNome } = useSession();
+  const { dataVersion } = useApp();
 
-  const badgeFor = (key) => {
-    if (key === 'acervo') return badgeAcervo;
-    if (key === 'usuarios') return badgeUser;
-    if (key === 'atrasados') return atrasados;
-    return null;
-  };
+  const { data: painel } = useApi(
+    async () => {
+      if (isBibliotecario) return api.dashboardResumo(admId);
+      return api.dashboardLeitor(userId);
+    },
+    [isBibliotecario, admId, userId, dataVersion]
+  );
+
+  const nav = isBibliotecario ? NAV_BIBLIOTECARIO : NAV_LEITOR;
+  const badges = painel?.badges || {};
+
+  const badgeFor = (key) => (badges[key] ?? null);
 
   return (
     <>
       <aside className={`sidebar${open ? ' open' : ''}`}>
         <div className="sidebar-brand">
-          <div className="brand-logo">B</div>
-          <div className="brand-text">
-            <strong>BiblioGestor</strong>
-            <span>Acervo &amp; Usuários</span>
-          </div>
+          <img className="brand-banner" src="/assets/logo.svg" alt="Alexandria" />
         </div>
 
         <nav className="sidebar-nav">
-          {NAV.map((group) => (
+          {nav.map((group) => (
             <div key={group.label}>
               <p className="nav-label">{group.label}</p>
               {group.items.map((it) => {
@@ -64,7 +75,7 @@ export function Sidebar({ open, onClose }) {
                     <span>{it.text}</span>
                     {badge != null && (
                       <span
-                        className={`nav-badge${it.badge === 'atrasados' && badge > 0 ? ' badge-warn' : ''}`}
+                        className={`nav-badge${it.badge === 'overdue' && badge > 0 ? ' badge-warn' : ''}`}
                       >
                         {badge}
                       </span>
@@ -78,12 +89,17 @@ export function Sidebar({ open, onClose }) {
 
         <div className="sidebar-footer">
           <div className="sidebar-user">
-            <div className="avatar">AD</div>
+            <div className="avatar" style={{ background: user ? corPara(user.name) : '#64748b' }}>
+              {user ? initials(user.name) : '—'}
+            </div>
             <div>
-              <strong>Ana Dias</strong>
-              <span>Bibliotecária</span>
+              <strong>{user ? exibirNome(user) : 'Visitante'}</strong>
+              <span>{user ? cargoUsuario(user.userLevel) : 'Leitor'}</span>
             </div>
           </div>
+          <button className="btn btn-ghost btn-sm" onClick={logout} style={{ width: '100%', justifyContent: 'center' }}>
+            <Icon name="arrowBack" /> Sair da conta
+          </button>
         </div>
       </aside>
       <div className={`sidebar-backdrop${open ? ' show' : ''}`} onClick={onClose} />

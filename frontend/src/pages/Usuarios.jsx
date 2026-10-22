@@ -1,53 +1,63 @@
 /* ============================================================
-   BiblioGestor — Página: Usuários (CRUD)
+   Alexandria — Página: Usuários (CRUD, apenas bibliotecário)
    ============================================================ */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Icon } from '../ui/icons.jsx';
 import { useModal, useToast, ModalHead, Field, Dl, StatusBadge } from '../ui/Modal.jsx';
 import { useApp } from '../AppContext.jsx';
-import { useStore, usuarios, usuario, addUsuario, updateUsuario, removeUsuario, emprestimos, livro } from '../store/store.js';
+import { useSession } from '../store/session.jsx';
+import api from '../api/client.js';
+import { useApi } from '../api/useApi.js';
+import { useDebounce } from '../api/useDebounce.js';
+import { corPara, tipoUsuario } from '../ui/labels.js';
 import { Pagination, EmptyRow } from '../ui/common.jsx';
-import { initials, fmtDate, fmtMoney } from '../ui/format.js';
+import { initials, fmtDate } from '../ui/format.js';
 
-const TIPOS = ['Aluno', 'Professor', 'Funcionário', 'Externo'];
-const CORES = ['#334155', '#475569', '#64748b', '#5b6472', '#75849a', '#94a3b8'];
+const TIPOS = [
+  ['bibliotecario', 'Administrador'],
+  ['leitor', 'Leitor']
+];
 
-function colorOf(u) {
-  if (u.color) return u.color;
-  return CORES[u.matricula.split('').reduce((a, c) => a + c.charCodeAt(0), 0) % CORES.length];
-}
+const STATUS_OPTIONS = [
+  ['', 'Todos os status'],
+  ['ativo', 'Ativo'],
+  ['inativo', 'Inativo']
+];
+
+const PER_PAGE = 8;
 
 export function Usuarios() {
-  useStore();
+  const { admId } = useSession();
   const { openModal, confirmBox } = useModal();
   const toast = useToast();
+  const { detailRequest, dataVersion, reloadData } = useApp();
 
   const [q, setQ] = useState('');
   const [tipo, setTipo] = useState('');
   const [status, setStatus] = useState('');
   const [page, setPage] = useState(1);
-  const perPage = 8;
+  const qBusca = useDebounce(q, 300);
 
-  const all = usuarios();
+  const { data: pagina, loading, erro } = useApi(
+    async () => api.listUsers({ admId, q: qBusca, tipo, status, page, perPage: PER_PAGE }),
+    [admId, qBusca, tipo, status, page, dataVersion]
+  );
 
-  const filtered = useMemo(() => {
-    const query = q.trim().toLowerCase();
-    return all.filter((u) => {
-      const texto = (u.nome + ' ' + u.email + ' ' + u.matricula + ' ' + u.vinculo).toLowerCase();
-      if (query && !texto.includes(query)) return false;
-      if (tipo && u.tipo !== tipo) return false;
-      if (status && u.status !== status) return false;
-      return true;
-    });
-  }, [all, q, tipo, status]);
+  // Empréstimos em aberto (contagem na coluna da tabela).
+  const { data: emprestimos } = useApi(
+    async () => api.listLoans({ admId, perPage: 100 }),
+    [admId, dataVersion]
+  );
 
-  const pages = Math.max(1, Math.ceil(filtered.length / perPage));
-  const safePage = Math.min(page, pages);
-  const ini = (safePage - 1) * perPage;
-  const slice = filtered.slice(ini, ini + perPage);
+  const itens = pagina?.items || [];
+  const total = pagina?.total ?? 0;
+  const pages = pagina?.pages || 1;
+  const ini = (Math.min(page, pages) - 1) * PER_PAGE;
 
-  const { detailRequest } = useApp();
+  const emAberto = (userId) =>
+    (emprestimos?.items || []).filter((e) => e.userId === userId && e.status !== 'returned').length;
+
   useEffect(() => {
     if (detailRequest && detailRequest.page === 'usuarios' && detailRequest.id) {
       openDetail(detailRequest.id);
@@ -55,25 +65,25 @@ export function Usuarios() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detailRequest]);
 
-  const openForm = (id) => {
-    const u = id ? usuario(id) : null;
-    openModal(<UsuarioForm id={id} u={u} />, 'md');
+  const openForm = (id, usuario) => {
+    openModal(<UsuarioForm id={id} u={usuario} onSaved={reloadData} />, 'md');
   };
 
   const openDetail = (id) => {
-    const u = usuario(id);
-    if (!u) return;
-    openModal(<UsuarioDetail id={id} u={u} onEdit={() => openForm(id)} />, 'md');
+    openModal(<UsuarioDetail id={id} onEdit={(u) => openForm(u.id, u)} />, 'md');
   };
 
-  const excluir = (id) => {
-    const u = usuario(id);
-    if (!u) return;
+  const excluir = (u) => {
     confirmBox(
-      'Deseja realmente excluir <b>' + u.nome + '</b>? O registro será removido permanentemente.',
-      () => {
-        const r = removeUsuario(id);
-        toast(r.ok ? 'Usuário excluído.' : r.msg, r.ok ? 'success' : 'warn');
+      'Deseja realmente excluir <b>' + u.name + '</b>? O registro será removido permanentemente.',
+      async () => {
+        try {
+          await api.deleteUser(admId, u.id);
+          toast('Usuário excluído.', 'success');
+          reloadData();
+        } catch (e) {
+          toast(e.message || 'Não foi possível excluir o usuário.', 'warn');
+        }
       },
       { title: 'Excluir usuário', okText: 'Excluir', danger: true }
     );
@@ -85,14 +95,21 @@ export function Usuarios() {
         <div>
           <span className="page-kicker">Pessoas</span>
           <h1 className="page-title">Usuários</h1>
-          <p className="page-sub">{all.length} usuários cadastrados. Gerencie alunos, professores e externos.</p>
+          <p className="page-sub">{total} usuário{total !== 1 ? 's' : ''} cadastrado{total !== 1 ? 's' : ''}. Gerencie leitores e administradores.</p>
         </div>
         <div className="page-actions">
-          <button className="btn btn-primary" onClick={() => openForm(null)}>
+          <button className="btn btn-primary" onClick={() => openForm(null, null)}>
             <Icon name="plus" /> Novo usuário
           </button>
         </div>
       </div>
+
+      {erro && (
+        <div className="alert alert-danger" style={{ marginBottom: 16 }}>
+          <Icon name="close" />
+          <div><b>Não foi possível carregar os usuários</b><span>{erro}</span></div>
+        </div>
+      )}
 
       <div className="card">
         <div className="toolbar">
@@ -107,98 +124,163 @@ export function Usuarios() {
           </div>
           <select className="select" value={tipo} onChange={(e) => { setTipo(e.target.value); setPage(1); }}>
             <option value="">Todos os tipos</option>
-            {TIPOS.map((t) => <option key={t} value={t}>{t}</option>)}
+            {TIPOS.map(([v, t]) => <option key={v} value={v}>{t}</option>)}
           </select>
           <select className="select" value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }}>
-            <option value="">Todos os status</option>
-            <option value="ativo">Ativo</option>
-            <option value="inativo">Inativo</option>
+            {STATUS_OPTIONS.map(([v, t]) => <option key={v} value={v}>{t}</option>)}
           </select>
-          <span className="result-count">{filtered.length} resultado{filtered.length !== 1 ? 's' : ''}</span>
+          <span className="result-count">{total} resultado{total !== 1 ? 's' : ''}</span>
         </div>
 
         <div className="table-wrap">
           <table className="table">
             <thead>
               <tr>
-                <th>Usuário</th><th>Matrícula</th><th>Tipo</th><th>Contato</th>
-                <th style={{ textAlign: 'center' }}>Empr. abertos</th><th style={{ textAlign: 'right' }}>Multa</th>
+                <th>Nome</th><th>Matrícula</th><th>Tipo</th><th>Contato</th>
+                <th style={{ textAlign: 'center' }}>Empr. abertos</th>
                 <th>Status</th><th style={{ textAlign: 'right' }}>Ações</th>
               </tr>
             </thead>
             <tbody>
-              {slice.length ? slice.map((u) => <UsuarioRow key={u.id} u={u} onEditar={openForm} onExcluir={excluir} />)
-                : <EmptyRow icon="users" text="Nenhum usuário encontrado para os filtros aplicados." colspan={8} />}
+              {loading && !itens.length
+                ? <EmptyRow icon="users" text="Carregando..." colspan={7} />
+                : itens.length
+                  ? itens.map((u) => (
+                    <UsuarioRow
+                      key={u.id}
+                      u={u}
+                      emAberto={emAberto(u.id)}
+                      onVer={() => openDetail(u.id)}
+                      onEditar={() => openForm(u.id, u)}
+                      onExcluir={() => excluir(u)}
+                    />
+                  ))
+                  : <EmptyRow icon="users" text="Nenhum usuário encontrado para os filtros aplicados." colspan={7} />}
             </tbody>
           </table>
         </div>
 
-        <Pagination ini={ini} total={filtered.length} perPage={perPage} page={safePage} onPage={setPage} />
+        <Pagination ini={ini} total={total} perPage={PER_PAGE} page={Math.min(page, pages)} onPage={setPage} />
       </div>
     </div>
   );
 }
 
-function UsuarioRow({ u, onEditar, onExcluir }) {
-  const emAberto = emprestimos().filter((e) => e.usuarioId === u.id && e.status !== 'devolvido').length;
-  const cor = colorOf(u);
+function UsuarioRow({ u, emAberto, onVer, onEditar, onExcluir }) {
   return (
     <tr>
       <td>
         <div className="cell-user">
-          <div className="avatar-sm" style={{ background: cor }}>{initials(u.nome)}</div>
-          <div className="cell-title"><b>{u.nome}</b><span>{u.vinculo || u.tipo}</span></div>
+          <div className="avatar-sm" style={{ background: corPara(u.name) }}>{initials(u.name)}</div>
+          <div className="cell-title"><b>{u.name}</b><span>{tipoUsuario(u.userLevel)}</span></div>
         </div>
       </td>
-      <td>{u.matricula}</td>
-      <td><span className="badge badge-gray">{u.tipo}</span></td>
+      <td>{u.matricula || '—'}</td>
+      <td><span className="badge badge-gray">{tipoUsuario(u.userLevel)}</span></td>
       <td>
         {u.email}
         <span style={{ display: 'block', color: 'var(--text-3)', fontSize: 12 }}>{u.telefone || ''}</span>
       </td>
       <td style={{ textAlign: 'center' }}>{emAberto}</td>
-      <td style={{ textAlign: 'right' }}>{fmtMoney(u.multa)}</td>
       <td><StatusBadge status={u.status} /></td>
       <td>
         <div className="row-actions">
-          <button className="row-action edit" onClick={() => onEditar(u.id)} title="Editar"><Icon name="edit" /></button>
-          <button className="row-action danger" onClick={() => onExcluir(u.id)} title="Excluir"><Icon name="trash" /></button>
+          <button className="row-action" onClick={onVer} title="Detalhes"><Icon name="eye" /></button>
+          <button className="row-action edit" onClick={onEditar} title="Editar"><Icon name="edit" /></button>
+          <button className="row-action danger" onClick={onExcluir} title="Excluir"><Icon name="trash" /></button>
         </div>
       </td>
     </tr>
   );
 }
 
-function UsuarioForm({ id, u }) {
+function UsuarioForm({ id, u, onSaved }) {
   const { closeModal } = useModal();
   const toast = useToast();
-  const isEdit = !!u;
+  const { admId } = useSession();
+  const isEdit = !!id;
+
   const [dados, setDados] = useState(() => ({
-    nome: u ? u.nome : '',
+    name: u ? u.name : '',
     email: u ? u.email : '',
     telefone: u ? u.telefone : '',
-    matricula: u ? u.matricula : '',
-    tipo: u ? u.tipo : 'Aluno',
-    vinculo: u ? u.vinculo : '',
+    userLevel: u ? u.userLevel : 'leitor',
     status: u ? u.status : 'ativo',
-    multa: u ? (u.multa || 0) : 0
+    cep: u?.endereco?.cep || u?.CEP || '',
+    numero: u?.endereco?.numero || '',
+    complemento: u?.endereco?.complemento || ''
   }));
+  const [endereco, setEndereco] = useState(u?.endereco || null);
+  const [buscandoCep, setBuscandoCep] = useState(false);
+  const [salvando, setSalvando] = useState(false);
 
   const set = (k) => (e) => setDados((d) => ({ ...d, [k]: e.target.value }));
 
-  const submit = (e) => {
-    e.preventDefault();
-    if (!dados.nome.trim() || !dados.email.trim() || !dados.matricula.trim()) { toast('Preencha os campos obrigatórios.', 'warn'); return; }
-    const cor = CORES[Math.floor(Math.random() * CORES.length)];
-    const payload = { ...dados, multa: Number(dados.multa) || 0 };
-    if (isEdit) {
-      updateUsuario(id, { ...payload, color: u.color || cor });
-      toast('Usuário atualizado com sucesso.', 'success');
-    } else {
-      addUsuario({ ...payload, color: cor });
-      toast('Usuário cadastrado com sucesso.', 'success');
+  // Consulta o CEP e preenche o endereço (somente leitura).
+  const buscarCep = async (valor) => {
+    const digitos = String(valor || '').replace(/\D/g, '');
+    if (digitos.length !== 8) {
+      setEndereco(null);
+      return;
     }
-    closeModal();
+    setBuscandoCep(true);
+    try {
+      const dadosEndereco = await api.lookupCep(digitos);
+      setEndereco(dadosEndereco);
+      setDados((d) => ({ ...d, cep: digitos }));
+    } catch (e) {
+      setEndereco(null);
+      toast(e.message || 'Não foi possível consultar o CEP.', 'warn');
+    } finally {
+      setBuscandoCep(false);
+    }
+  };
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!dados.name.trim() || !dados.email.trim()) {
+      toast('Preencha os campos obrigatórios.', 'warn');
+      return;
+    }
+    if (!dados.cep.trim()) {
+      toast('Informe o CEP.', 'warn');
+      return;
+    }
+    if (!dados.numero.trim()) {
+      toast('Informe o número do endereço.', 'warn');
+      return;
+    }
+
+    const payload = {
+      name: dados.name.trim(),
+      email: dados.email.trim(),
+      telefone: dados.telefone.trim(),
+      userLevel: dados.userLevel,
+      status: dados.status,
+      cep: dados.cep.trim(),
+      numero: dados.numero.trim(),
+      complemento: dados.complemento.trim()
+    };
+
+    setSalvando(true);
+    try {
+      if (isEdit) {
+        await api.updateUser(admId, id, payload);
+        toast('Usuário atualizado com sucesso.', 'success');
+      } else {
+        const criado = await api.createUser(admId, payload);
+        toast(
+          `Usuário cadastrado (matrícula ${criado.matricula}). A senha provisória foi enviada para o e-mail.`,
+          'success'
+        );
+      }
+      onSaved?.();
+      closeModal();
+    } catch (err) {
+      toast(err.message || 'Não foi possível salvar o usuário.', 'warn');
+    } finally {
+      setSalvando(false);
+    }
   };
 
   return (
@@ -209,7 +291,7 @@ function UsuarioForm({ id, u }) {
         <div className="modal-body">
           <div className="form-grid">
             <Field label="Nome completo *" full>
-              <input className="input" value={dados.nome} onChange={set('nome')} placeholder="Nome do usuário" required />
+              <input className="input" value={dados.name} onChange={set('name')} placeholder="Nome do usuário" required />
             </Field>
             <Field label="E-mail *">
               <input className="input" type="email" value={dados.email} onChange={set('email')} placeholder="email@dominio.com" required />
@@ -217,12 +299,39 @@ function UsuarioForm({ id, u }) {
             <Field label="Telefone">
               <input className="input" value={dados.telefone} onChange={set('telefone')} placeholder="(00) 00000-0000" />
             </Field>
-            <Field label="Matrícula *">
-              <input className="input" value={dados.matricula} onChange={set('matricula')} placeholder="Ex.: 2024001234" required />
+            <Field label="CEP *">
+              <input
+                className="input"
+                value={dados.cep}
+                onChange={(e) => { setDados((d) => ({ ...d, cep: e.target.value })); buscarCep(e.target.value); }}
+                onBlur={(e) => buscarCep(e.target.value)}
+                placeholder="00000-000"
+                inputMode="numeric"
+                maxLength={9}
+                required
+              />
+            </Field>
+            <Field label="Número *">
+              <input className="input" value={dados.numero} onChange={set('numero')} placeholder="Ex.: 250" required />
+            </Field>
+            <Field label="Complemento">
+              <input className="input" value={dados.complemento} onChange={set('complemento')} placeholder="Apto, sala..." />
+            </Field>
+            <Field label="Rua" full>
+              <input className="input" value={endereco?.rua || ''} readOnly placeholder={buscandoCep ? 'Consultando...' : 'Preenchido pelo CEP'} />
+            </Field>
+            <Field label="Bairro">
+              <input className="input" value={endereco?.bairro || ''} readOnly placeholder="Preenchido pelo CEP" />
+            </Field>
+            <Field label="Cidade">
+              <input className="input" value={endereco?.cidade || ''} readOnly placeholder="Preenchido pelo CEP" />
+            </Field>
+            <Field label="UF">
+              <input className="input" value={endereco?.estado || ''} readOnly placeholder="UF" />
             </Field>
             <Field label="Tipo *">
-              <select className="select" style={{ width: '100%' }} value={dados.tipo} onChange={set('tipo')}>
-                {TIPOS.map((t) => <option key={t} value={t}>{t}</option>)}
+              <select className="select" style={{ width: '100%' }} value={dados.userLevel} onChange={set('userLevel')}>
+                {TIPOS.map(([v, t]) => <option key={v} value={v}>{t}</option>)}
               </select>
             </Field>
             <Field label="Status">
@@ -231,16 +340,16 @@ function UsuarioForm({ id, u }) {
                 <option value="inativo">Inativo</option>
               </select>
             </Field>
-            <Field label="Vínculo / Curso" full>
-              <input className="input" value={dados.vinculo} onChange={set('vinculo')} placeholder="Ex.: Administração — 4º sem." />
-            </Field>
-            <Field label="Multa (R$)" full>
-              <input className="input" type="number" min="0" step="0.01" value={dados.multa} onChange={set('multa')} />
-            </Field>
           </div>
+          <p style={{ fontSize: 12, color: 'var(--text-3)', margin: '0 0 4px' }}>
+            A matrícula é gerada automaticamente pelo sistema (ano + número sequencial).
+            {!isEdit && ' Sem senha informada, o sistema gera uma senha provisória e a envia para o e-mail cadastrado.'}
+          </p>
           <div className="form-actions">
             <button type="button" className="btn" onClick={closeModal}>Cancelar</button>
-            <button type="submit" className="btn btn-primary">{isEdit ? 'Salvar alterações' : 'Cadastrar usuário'}</button>
+            <button type="submit" className="btn btn-primary" disabled={salvando || buscandoCep}>
+              {salvando ? 'Salvando...' : (isEdit ? 'Salvar alterações' : 'Cadastrar usuário')}
+            </button>
           </div>
         </div>
       </form>
@@ -248,54 +357,79 @@ function UsuarioForm({ id, u }) {
   );
 }
 
-function UsuarioDetail({ id, u, onEdit }) {
+function UsuarioDetail({ id, onEdit }) {
   const { closeModal } = useModal();
-  const cor = colorOf(u);
-  const historico = emprestimos().filter((e) => e.usuarioId === id).slice(0, 5);
-  const abertos = emprestimos().filter((e) => e.usuarioId === id && e.status !== 'devolvido').length;
+  const { admId } = useSession();
+
+  const { data: u, loading } = useApi(async () => api.getUser(id), [id]);
+  const { data: emprestimos } = useApi(
+    async () => api.listLoans({ admId, userId: id, perPage: 50 }),
+    [admId, id]
+  );
+
+  const lista = emprestimos?.items || [];
+  const historico = lista.slice(0, 5);
+  const abertos = lista.filter((e) => e.status !== 'returned').length;
 
   return (
     <>
       <ModalHead title="Detalhes do usuário" sub="Registro cadastral e movimentações." />
       <div className="modal-body">
-        <div className="detail-hero">
-          <div className="avatar" style={{ width: 56, height: 56, fontSize: 18, borderRadius: 14, background: cor }}>{initials(u.nome)}</div>
-          <div>
-            <h3>{u.nome}</h3>
-            <p>{u.vinculo || u.tipo}</p>
-            <div style={{ marginTop: 8 }}>
-              <StatusBadge status={u.status} /> <span className="badge badge-gray">{u.tipo}</span>
+        {loading || !u ? (
+          <p style={{ color: 'var(--text-3)', fontSize: 13 }}>Carregando...</p>
+        ) : (
+          <>
+            <div className="detail-hero">
+              <div className="avatar" style={{ width: 56, height: 56, fontSize: 18, borderRadius: 14, background: corPara(u.name) }}>
+                {initials(u.name)}
+              </div>
+              <div>
+                <h3>{u.name}</h3>
+                <p>{tipoUsuario(u.userLevel)}</p>
+                <div style={{ marginTop: 8 }}>
+                  <StatusBadge status={u.status} /> <span className="badge badge-gray">{tipoUsuario(u.userLevel)}</span>
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
 
-        <div style={{ marginTop: 16 }} className="detail-list">
-          <Dl label="Matrícula" value={u.matricula} />
-          <Dl label="E-mail" value={u.email || '—'} />
-          <Dl label="Telefone" value={u.telefone || '—'} />
-          <Dl label="Multa pendente" value={<b style={{ color: u.multa > 0 ? 'var(--red)' : 'var(--green)' }}>{fmtMoney(u.multa)}</b>} />
-          <Dl label="Cadastrado em" value={fmtDate(u.cadastradoEm)} />
-          <Dl label="Empréstimos abertos" value={abertos} />
-        </div>
+            <div style={{ marginTop: 16 }} className="detail-list">
+              <Dl label="Matrícula" value={u.matricula || '—'} />
+              <Dl label="E-mail" value={u.email || '—'} />
+              <Dl label="Telefone" value={u.telefone || '—'} />
+              <Dl label="Endereço" value={u.endereco ? (
+                <>
+                  {u.endereco.rua}, {u.endereco.numero}
+                  {u.endereco.complemento ? ` — ${u.endereco.complemento}` : ''}
+                  <br />
+                  {u.endereco.bairro} — {u.endereco.cidade}/{u.endereco.estado}
+                  <br />
+                  CEP {u.endereco.cep}
+                </>
+              ) : '—'} />
+              <Dl label="Cadastrado em" value={fmtDate(u.createdAt)} />
+              <Dl label="Empréstimos abertos" value={abertos} />
+            </div>
+          </>
+        )}
 
         <h4 style={{ margin: '18px 0 6px', fontSize: 13, fontWeight: 700 }}>Histórico de empréstimos</h4>
         {historico.length ? (
           <ul className="mini-list">
-            {historico.map((e) => {
-              const l = livro(e.livroId);
-              return (
-                <li key={e.id} style={{ padding: '10px 0' }}>
-                  <div className="m-main"><b>{l ? l.titulo : '—'}</b><span>Emprestado em {fmtDate(e.dataEmprestimo)}</span></div>
-                  <div className="m-side"><StatusBadge status={e.status} /></div>
-                </li>
-              );
-            })}
+            {historico.map((e) => (
+              <li key={e.id} style={{ padding: '10px 0' }}>
+                <div className="m-main">
+                  <b>{e.book ? e.book.title : '—'}</b>
+                  <span>Emprestado em {fmtDate(e.dataEmprestimo)}</span>
+                </div>
+                <div className="m-side"><StatusBadge status={e.status} /></div>
+              </li>
+            ))}
           </ul>
         ) : <p style={{ color: 'var(--text-3)', fontSize: 13 }}>Sem registro de empréstimos.</p>}
 
         <div className="form-actions">
           <button className="btn" onClick={closeModal}>Fechar</button>
-          <button className="btn btn-soft" onClick={() => { closeModal(); onEdit(); }}>
+          <button className="btn btn-soft" onClick={() => { closeModal(); onEdit(u); }} disabled={!u}>
             <Icon name="edit" /> Editar
           </button>
         </div>

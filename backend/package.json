@@ -9,6 +9,8 @@
   "scripts": {
     "dev": "nodemon --exec tsx src/server.ts",
     "seed": "tsx src/scripts/seed.ts",
+    "migrate": "tsx src/scripts/migrate.ts",
+    "notify": "tsx src/scripts/notify.ts",
     "build": "tsc",
     "start": "node --env-file=../.env dist/server.js"
   },
@@ -20,8 +22,7 @@
     "@types/nodemon": "^1.19.6",
     "@types/sequelize": "^4.28.20",
     "@types/swagger-jsdoc": "^6.0.4",
-    "@types/swagger-ui-express": "^4.1.8",
-    "@types/web-push": "^3.6.4"
+    "@types/swagger-ui-express": "^4.1.8"
   },
   "dependencies": {
     "bcrypt": "^6.0.0",
@@ -31,13 +32,11 @@
     "node-cron": "^4.6.0",
     "nodemailer": "^9.0.3",
     "nodemon": "^3.1.14",
-    "redis": "^6.2.1",
     "sequelize": "^6.37.8",
     "sqlite3": "^6.0.1",
     "swagger-jsdoc": "^6.3.0",
     "swagger-ui-express": "^5.0.1",
     "tsx": "^4.22.4",
-    "typescript": "^6.0.3",
-    "web-push": "^3.6.7"
+    "typescript": "^6.0.3"
   }
 }

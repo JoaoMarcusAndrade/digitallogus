@@ -9,10 +9,14 @@
  *    preservar o histórico.
  */
 
+import { Op } from "sequelize";
 import Book from "../models/Book.js";
-import History from "../models/History.js";
+import Emprestimo from "../models/Emprestimo.js";
 import User from "../models/User.js";
+import sequelize from "../database/index.js";
+import { toBookDTO, toLoanDTO } from "../dto/serializers.js";
 import { httpError, requireLibrarian } from "../utils/auth.js";
+import { contem, lerPaginacao, montarPagina, termoBusca } from "../utils/pagination.js";
 
 interface BookDTO {
   title: string;
@@ -27,18 +31,106 @@ interface BookDTO {
 }
 
 function sanitizeBook(book: Book) {
-  return book.toJSON();
+  return toBookDTO(book);
+}
+
+interface FiltrosLivros {
+  q?: string;
+  category?: string;
+  categoria?: string;
+  status?: string;
+  page?: number;
+  perPage?: number;
 }
 
 /**
- * Lista todos os livros do acervo.
+ * Status calculado de um título (mesma regra do protótipo):
+ *  - out:      nenhum exemplar disponível
+ *  - loaned:   parte dos exemplares está emprestada
+ *  - available: todos os exemplares estão livres
+ */
+export function statusDoLivro(livro: { quantity: number; quantityAvailable: number }): "available" | "loaned" | "out" {
+  const total = Number(livro.quantity) || 0;
+  const disponiveis = Number(livro.quantityAvailable) || 0;
+  if (disponiveis <= 0) return "out";
+  return disponiveis < total ? "loaned" : "available";
+}
+
+/**
+ * Lista o acervo com busca, filtros e paginação no servidor.
  * Acesso: qualquer usuário (leitor pode apenas visualizar).
  */
-export async function getAllBooks() {
-  const books = await Book.findAll({
-    order: [["title", "ASC"]]
-  });
-  return books.map(sanitizeBook);
+export async function getAllBooks(filtros: FiltrosLivros = {}) {
+  const pagina = lerPaginacao(filtros);
+  // `any` para permitir as chaves simbólicas do Sequelize (Op.and / Op.or).
+  const where: any = {};
+
+  const termo = termoBusca(filtros.q);
+  if (termo) {
+    where[Op.or] = [
+      { title: contem(termo) },
+      { author: contem(termo) },
+      { ISBN: contem(termo) },
+      { publisher: contem(termo) }
+    ];
+  }
+
+  const categoria = (filtros.category ?? filtros.categoria ?? "").trim();
+  if (categoria) where.category = categoria;
+
+  const status = String(filtros.status ?? "").trim().toLowerCase();
+  if (status === "available" || status === "disponivel") {
+    where[Op.and] = [
+      { quantityAvailable: { [Op.gt]: 0 } },
+      sequelize.where(sequelize.col("quantityAvailable"), Op.eq, sequelize.col("quantity"))
+    ];
+  } else if (status === "loaned" || status === "emprestado") {
+    where[Op.and] = [
+      { quantityAvailable: { [Op.gt]: 0 } },
+      sequelize.where(sequelize.col("quantityAvailable"), Op.lt, sequelize.col("quantity"))
+    ];
+  } else if (status === "out" || status === "esgotado") {
+    where.quantityAvailable = 0;
+  }
+
+  const [total, books] = await Promise.all([
+    Book.count({ where }),
+    Book.findAll({
+      where,
+      limit: pagina.limit,
+      offset: pagina.offset,
+      order: [["title", "ASC"]]
+    })
+  ]);
+
+  return montarPagina(books.map(sanitizeBook), total, pagina);
+}
+
+/**
+ * Categorias existentes no acervo, com a contagem de títulos e exemplares.
+ * Usado no filtro do acervo e no card "Acervo por categoria" do painel.
+ */
+export async function getCategories() {
+  const books = await Book.findAll({ attributes: ["category", "quantity", "quantityAvailable"] });
+
+  const mapa = new Map<string, { titles: number; copies: number; available: number }>();
+  for (const b of books) {
+    const categoria = (b.get("category") as string) || "Outros";
+    const atual = mapa.get(categoria) ?? { titles: 0, copies: 0, available: 0 };
+    atual.titles += 1;
+    atual.copies += Number(b.get("quantity")) || 0;
+    atual.available += Number(b.get("quantityAvailable")) || 0;
+    mapa.set(categoria, atual);
+  }
+
+  return [...mapa.entries()]
+    .map(([category, dados]) => ({
+      category,
+      titles: dados.titles,
+      copies: dados.copies,
+      available: dados.available
+    }))
+    .sort((a, b) => b.copies - a.copies);
 }
 
 /**
@@ -137,35 +229,29 @@ export async function updateBook(admId: number, bookId: number, data: Partial<Bo
 /**
  * Retorna o histórico de empréstimos de um livro, com os leitores e as datas
  * de entrada (dataEmprestimo) e saída (dataDevolucao).
- * Acesso: qualquer usuário (visualização).
+ * Acesso: apenas o bibliotecário — o leitor não precisa saber quem pegou o livro.
  */
-export async function getBookHistory(bookId: number) {
+export async function getBookHistory(admId: number, bookId: number) {
+  await requireLibrarian(admId);
+
   const book = await Book.findByPk(bookId);
   if (!book) {
     throw httpError("Livro não encontrado", 404);
   }
 
-  const records = await History.findAll({
+  const records = await Emprestimo.findAll({
     where: { bookId },
     include: [
       {
         model: User,
         as: "leitor",
-        attributes: ["id", "name", "email", "telefone"]
+        attributes: ["id", "name", "matricula", "email", "telefone", "userLevel", "status"]
       }
     ],
     order: [["dataEmprestimo", "DESC"]]
   });
 
-  return records.map((h) => ({
-    id: h.get("id"),
-    leitor: h.get("leitor"),
-    dataEmprestimo: h.get("dataEmprestimo"),
-    dataDevolucaoPrevista: h.get("dataDevolucaoPrevista"),
-    dataDevolucao: h.get("dataDevolucao"),
-    renovacoes: h.get("renovacoes"),
-    status: h.get("status")
-  }));
+  return records.map((h) => toLoanDTO(h));
 }
 
 /**
@@ -181,7 +267,7 @@ export async function deleteBook(admId: number, bookId: number) {
   }
 
   // Verifica empréstimos ativos (status diferente de 'devolvido')
-  const active = await History.count({
+  const active = await Emprestimo.count({
     where: { bookId, status: ['ativo', 'atrasado'] }
   });
 

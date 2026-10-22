@@ -15,17 +15,70 @@ const router = Router();
  * @swagger
  * /api/livros:
  *   get:
- *     summary: Lista todos os livros do acervo
- *     description: Retorna todos os títulos cadastrados. Acesso liberado para leitores (apenas visualização).
+ *     summary: Lista o acervo com busca, filtros e paginação
+ *     description: Retorna os títulos cadastrados com busca textual, filtro por categoria, filtro por status (disponivel | emprestado | esgotado) e paginação no servidor. Acesso liberado para leitores (apenas visualização).
  *     tags:
  *       - Livros
+ *     parameters:
+ *       - in: query
+ *         name: q
+ *         required: false
+ *         description: Termo de busca (título, autor, ISBN ou editora)
+ *         schema:
+ *           type: string
+ *         example: "dom casmurro"
+ *       - in: query
+ *         name: category
+ *         required: false
+ *         description: Filtra por categoria
+ *         schema:
+ *           type: string
+ *         example: "Romance"
+ *       - in: query
+ *         name: status
+ *         required: false
+ *         description: Filtra pela disponibilidade dos exemplares
+ *         schema:
+ *           type: string
+ *           enum: [disponivel, emprestado, esgotado]
+ *         example: "disponivel"
+ *       - in: query
+ *         name: page
+ *         required: false
+ *         description: Página atual (padrão 1)
+ *         schema:
+ *           type: integer
+ *         example: 1
+ *       - in: query
+ *         name: perPage
+ *         required: false
+ *         description: Itens por página (padrão 8)
+ *         schema:
+ *           type: integer
+ *         example: 8
  *     responses:
  *       '200':
- *         description: Lista de livros
+ *         description: Página de livros no envelope { items, total, page, perPage, pages }
  *       '500':
  *         description: Falha ao listar livros
  */
 router.get('/', bookController.selectAll);
+
+/**
+ * @swagger
+ * /api/livros/categorias:
+ *   get:
+ *     summary: Lista as categorias do acervo
+ *     description: Retorna as categorias existentes no acervo com a contagem de títulos e exemplares. Usado no filtro do acervo e no painel.
+ *     tags:
+ *       - Livros
+ *     responses:
+ *       '200':
+ *         description: Lista de categorias
+ *       '500':
+ *         description: Falha ao listar categorias
+ */
+router.get('/categorias', bookController.categories);
 
 /**
  * @swagger
@@ -56,10 +109,17 @@ router.get('/:bookId', bookController.select);
  * /api/livros/{bookId}/history:
  *   get:
  *     summary: Histórico de empréstimos de um livro
- *     description: Retorna o histórico do livro com os leitores e as datas de entrada (dataEmprestimo) e saída (dataDevolucao).
+ *     description: Retorna o histórico do livro com os leitores e as datas de entrada (dataEmprestimo) e saída (dataDevolucao). Restrito ao bibliotecário (admId).
  *     tags:
  *       - Livros
  *     parameters:
+ *       - in: query
+ *         name: admId
+ *         required: true
+ *         description: ID do usuário bibliotecário
+ *         schema:
+ *           type: integer
+ *           example: 1
  *       - in: path
  *         name: bookId
  *         required: true

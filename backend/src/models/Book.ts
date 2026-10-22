@@ -27,6 +27,8 @@ class Book extends Model<
   declare quantity: number;           // total de exemplares
   declare quantityAvailable: number;  // exemplares disponíveis
   declare coverColor: CreationOptional<string | null>; // cor da capa (apoio visual)
+  declare createdAt: CreationOptional<Date>;
+  declare updatedAt: CreationOptional<Date>;
 }
 
 Book.init({
@@ -128,6 +130,16 @@ Book.init({
 
   coverColor: {
     type: DataTypes.STRING(9),
+    allowNull: true
+  },
+
+  createdAt: {
+    type: DataTypes.DATE,
+    allowNull: true
+  },
+
+  updatedAt: {
+    type: DataTypes.DATE,
     allowNull: true
   }
 
